@@ -16,18 +16,18 @@ average_outage_counters = {}
 average_resources_used = {}
 number_of_training_routines_per_model = 1
 out = 10
-number_of_tests = 6000
+number_of_tests = 5000
 # qth_range =[0.25, 0.35, 0.45, 0.55]
 # qth_range = [0.8, 0.999] #for testing
 # qth_range = [0.1, 0.3, 0.5, 0.7, 0.9] #for testing
 qth_range= [0.5] #for training
 phase_shift = 0.1
 #qth_range = [0.00001]
-epochs = 15
-epoch_size = 100
+epochs = 75
+epoch_size = 300
 resources = [10]
 model_prefix_names = ["fin_coef_loss","binary_cross_entropy"]
-force_retrain_models = False
+force_retrain_models = True
 temperature_value = 0 #used 10 before
 
 
@@ -120,7 +120,7 @@ for qth in qth_range:
                         with open(f'simulation_results_{resource}_{model_prefix}_microqth.txt', 'a') as convert_file:
                             convert_file.write("\nData configuration:\n")
                             convert_file.write(json.dumps(data_config, indent=4))
-                            convert_file.write(f"\nEpochs: {epochs}, qth: {qth_range}, Number of tests: {number_of_tests}\n")
+                            convert_file.write(f"\nEpochs: {epochs}, qth: {qth}, Number of tests: {number_of_tests}\n")
                             convert_file.write("\n\nP_R:\n")
                             convert_file.write(json.dumps(P_R, indent=4))
                             convert_file.write("\n\nAverage number of sub-bands used:\n")
@@ -130,7 +130,7 @@ for qth in qth_range:
                         with open(f'analytic_results_{resource}_{model_prefix}_microqth.txt', 'a') as convert_file:
                             convert_file.write("\nData configuration:\n")
                             convert_file.write(json.dumps(data_config, indent=4))
-                            convert_file.write(f"\nEpochs: {epochs}, qth: {qth_range}, Number of tests: {number_of_tests}\n")
+                            convert_file.write(f"\nEpochs: {epochs}, qth: {qth}, Number of tests: {number_of_tests}\n")
                             convert_file.write("\nP_1:\n")
                             convert_file.write(json.dumps(P_1, indent=4))
                             convert_file.write("\nP_inf:\n")

@@ -75,7 +75,7 @@ def get_fitted_model(data_input,
                             optimizer=tf.keras.optimizers.Adam(),
                             metrics=[tf.keras.metrics.MeanAbsoluteError()])
         elif "binary_cross_entropy" in model_name:
-            model.compile(loss=tf.keras.losses.BinaryCrossentropy(from_logits=True),
+            model.compile(loss=tf.keras.losses.BinaryCrossentropy(from_logits=False),
                             optimizer=tf.keras.optimizers.Adam(),
                             metrics=[tf.keras.metrics.Recall(), 
                                     tf.keras.metrics.Precision(),

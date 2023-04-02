@@ -77,8 +77,6 @@ for qth in qth_range:
                             X, y_label = training_generator.__getitem__(0)
                             Y_pred = multi_lstm_model.predict(X)
 
-                            Y_pred = tf.nn.softmax(Y_pred, axis = -1)
-
                             resource_used = 0
                             
                             # Loop over the pre-calibrated outputs

@@ -22,13 +22,12 @@ class TemperatureModel(tf.keras.Model):
     self.layer2 = tf.keras.layers.Dense(output_size,
                                 kernel_initializer=tf.initializers.HeUniform(), 
                                 activation=tf.keras.layers.PReLU())
-    self.layer3 = tf.keras.layers.Dense(2,
+    self.layer3 = tf.keras.layers.Dense(1,
                                 kernel_initializer=tf.initializers.HeUniform(), 
-                                activation=tf.keras.layers.PReLU())
-    self.layer4 = tf.keras.layers.Softmax()                             
+                                activation=tf.keras.activations.sigmoid)                            
     
   def call(self, inputs):
-    x = self.layer4(self.layer3(self.layer2(self.layer1(inputs))))
+    x = self.layer3(self.layer2(self.layer1(inputs)))
     return x
 
 def compute_loss():
@@ -93,7 +92,7 @@ def get_fitted_model(data_input,
                                     tf.keras.metrics.BinaryAccuracy(),
                                     tf.keras.metrics.Accuracy()])
         elif "fin_coef_loss" in model_name:
-            model.compile(loss=FiniteOutageCoefficientLoss(S = data_input["batch_size"], qth= 1 - qth),
+            model.compile(loss=FiniteOutageCoefficientLoss(S = data_input["batch_size"], qth = qth),
                             optimizer=tf.keras.optimizers.Adam(),
                             metrics=[tf.keras.metrics.Recall(), 
                                     tf.keras.metrics.Precision(),
@@ -102,7 +101,9 @@ def get_fitted_model(data_input,
         elif "dummy" in model_name:
             return DummyModel()
 
-        history = model.fit(training_generator, epochs=epochs)
+        callback = tf.keras.callbacks.EarlyStopping(monitor='loss', patience=epochs, restore_best_weights=True)
+        history = model.fit(training_generator, epochs=epochs,
+                            callbacks=[callback])
         model.save(path)
         return model
 

@@ -80,7 +80,7 @@ class OutageData(FrequencyResponseGenerator):
         reshape_vector = [self.batch_size, 1]
         y = tf.reshape(y, reshape_vector)
         success = tf.cast(tf.math.log(1+y) / tf.math.log(2.0) > self.rate_threshold, tf.float32)
-        return X,  tf.concat([1-success, success], axis=-1)
+        return X, 1-success
 
 
     def __len__(self):

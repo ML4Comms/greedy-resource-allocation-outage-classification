@@ -16,15 +16,15 @@ average_outage_counters = {}
 average_resources_used = {}
 number_of_training_routines_per_model = 10
 out = 10
-number_of_tests = 5000
+number_of_tests = 1
 # qth_range =[0.25, 0.35, 0.45, 0.55]
 # qth_range = [0.8, 0.999] #for testing
 # qth_range = [0.9] #for testing
 qth_range= [0.5] #for training
 phase_shift = 0.1
 #qth_range = [0.00001]
-epochs = 20
-epoch_size = 150
+epochs = 1
+epoch_size = 1
 resources = [10]
 model_prefix_names = ["fin_coef_loss","binary_cross_entropy"]
 force_retrain_models = True
@@ -36,9 +36,10 @@ for qth in qth_range:
         for resource in resources:
             for model_prefix in model_prefix_names:
                 for rate_threshold in [1.05]:
-                    model_name = f"{model_prefix}_rt-{rate_threshold}_r-{resource}_qth--{qth}_lstm-{lstm_size}_out-{out}_phase-{phase_shift}"
-                    average_outage_counters[model_name] = 0
-                    average_resources_used[model_name] = 0
+                    model_result = f"{model_prefix}_rt-{rate_threshold}_r-{resource}_qth--{qth}_lstm-{lstm_size}_out-{out}_phase-{phase_shift}"
+                    model_name = model_prefix
+                    average_outage_counters[model_result] = 0
+                    average_resources_used[model_result] = 0
                     
                     
                     for _ in range(number_of_training_routines_per_model):
@@ -54,12 +55,12 @@ for qth in qth_range:
                                 }
                         training_generator = OutageData(**data_config,)
 
-                        P_R[model_name] = 0.0
-                        resources_used[model_name] = 0.0
+                        P_R[model_result] = 0.0
+                        resources_used[model_result] = 0.0
                        
-                        P_inf[model_name] = 0.0
-                        cdf[model_name] = 0.0
-                        P_1[model_name] = 0.0
+                        P_inf[model_result] = 0.0
+                        cdf[model_result] = 0.0
+                        P_1[model_result] = 0.0
 
                         P_1_counter = 0
                         P_inf_counter = 0
@@ -83,41 +84,41 @@ for qth in qth_range:
                             for idx, y_pred in enumerate(Y_pred):
                                
                                 P_1_counter += 1
-                                P_1[model_name] += float(y_label[idx][0])
+                                P_1[model_result] += float(y_label[idx][0])
                                     
                                 
                                 cdf_counter += 1
                                 if y_pred[0] <= qth:
-                                    cdf[model_name] += 1.0
+                                    cdf[model_result] += 1.0
 
                                 if y_pred[0] <= qth:
                                     P_inf_counter += 1
-                                    P_inf[model_name] += float(y_label[idx][0])
+                                    P_inf[model_result] += float(y_label[idx][0])
                                 
                                 
                                 resource_used = idx
                                 if idx == resource-1:
                                     if y_label[idx][0] >= 0.5:
-                                        P_R[model_name] += 1.0
+                                        P_R[model_result] += 1.0
                                     break
                                 elif y_pred[0] <= qth:
                                     if y_label[idx][0] >= 0.5:
-                                        P_R[model_name] += 1.0
+                                        P_R[model_result] += 1.0
                                     break
                                 else:
                                     continue
 
-                            resources_used[model_name] += resource_used
-                            # print(f"{model_name}, "f"Test {_}:", f"Used sub-band number {resource_used}")
+                            resources_used[model_result] += resource_used
+                            # print(f"{model_result}, "f"Test {_}:", f"Used sub-band number {resource_used}")
                        
 
-                        P_R[model_name] = P_R[model_name] / number_of_tests
-                        average_outage_counters[model_name]+=P_R[model_name]
-                        resources_used[model_name] = resources_used[model_name] / number_of_tests
-                        average_resources_used[model_name]+=resources_used[model_name]
-                        P_1[model_name] = P_1[model_name] / P_1_counter
-                        P_inf[model_name] = (0 if P_inf_counter ==0 else P_inf[model_name] / P_inf_counter)
-                        cdf[model_name] = cdf[model_name] / cdf_counter
+                        P_R[model_result] = P_R[model_result] / number_of_tests
+                        average_outage_counters[model_result]+=P_R[model_result]
+                        resources_used[model_result] = resources_used[model_result] / number_of_tests
+                        average_resources_used[model_result]+=resources_used[model_result]
+                        P_1[model_result] = P_1[model_result] / P_1_counter
+                        P_inf[model_result] = (0 if P_inf_counter ==0 else P_inf[model_result] / P_inf_counter)
+                        cdf[model_result] = cdf[model_result] / cdf_counter
 
                         with open(f'simulation_results_{resource}_{model_prefix}_microqth.txt', 'a') as convert_file:
                             convert_file.write("\nData configuration:\n")
@@ -142,8 +143,8 @@ for qth in qth_range:
                             convert_file.write("\n=====================================\n")
 
                                                        
-                    average_outage_counters[model_name] = average_outage_counters[model_name] / number_of_training_routines_per_model
-                    average_resources_used[model_name] = average_resources_used[model_name] / number_of_training_routines_per_model
+                    average_outage_counters[model_result] = average_outage_counters[model_result] / number_of_training_routines_per_model
+                    average_resources_used[model_result] = average_resources_used[model_result] / number_of_training_routines_per_model
                     with open(f'final_results_{resource}_{model_prefix}.txt', 'w') as convert_file:
                         convert_file.write("\n\Outage probability:\n")
                         convert_file.write(json.dumps(average_outage_counters, indent=4))

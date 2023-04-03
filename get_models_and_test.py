@@ -14,12 +14,12 @@ P_R = {}
 resources_used = {}
 average_outage_counters = {}
 average_resources_used = {}
-number_of_training_routines_per_model = 1
+number_of_training_routines_per_model = 10
 out = 10
 number_of_tests = 5000
 # qth_range =[0.25, 0.35, 0.45, 0.55]
 # qth_range = [0.8, 0.999] #for testing
-# qth_range = [0.1, 0.3, 0.5, 0.7, 0.9] #for testing
+# qth_range = [0.9] #for testing
 qth_range= [0.5] #for training
 phase_shift = 0.1
 #qth_range = [0.00001]
@@ -36,7 +36,7 @@ for qth in qth_range:
         for resource in resources:
             for model_prefix in model_prefix_names:
                 for rate_threshold in [1.05]:
-                    model_name = f"{model_prefix}_rt-{rate_threshold}_r-{resource}_lstm-{lstm_size}_out-{out}_phase-{phase_shift}"
+                    model_name = f"{model_prefix}_rt-{rate_threshold}_r-{resource}_qth--{qth}_lstm-{lstm_size}_out-{out}_phase-{phase_shift}"
                     average_outage_counters[model_name] = 0
                     average_resources_used[model_name] = 0
                     
@@ -112,7 +112,9 @@ for qth in qth_range:
                        
 
                         P_R[model_name] = P_R[model_name] / number_of_tests
+                        average_outage_counters[model_name]+=P_R[model_name]
                         resources_used[model_name] = resources_used[model_name] / number_of_tests
+                        average_resources_used[model_name]+=resources_used[model_name]
                         P_1[model_name] = P_1[model_name] / P_1_counter
                         P_inf[model_name] = (0 if P_inf_counter ==0 else P_inf[model_name] / P_inf_counter)
                         cdf[model_name] = cdf[model_name] / cdf_counter
@@ -142,7 +144,7 @@ for qth in qth_range:
                                                        
                     average_outage_counters[model_name] = average_outage_counters[model_name] / number_of_training_routines_per_model
                     average_resources_used[model_name] = average_resources_used[model_name] / number_of_training_routines_per_model
-                    with open(f'final_results_{resource}_{model_prefix}_microqth.txt', 'w') as convert_file:
+                    with open(f'final_results_{resource}_{model_prefix}.txt', 'w') as convert_file:
                         convert_file.write("\n\Outage probability:\n")
                         convert_file.write(json.dumps(average_outage_counters, indent=4))
                         convert_file.write("\n\nSub-bands:\n")

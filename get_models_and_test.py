@@ -16,17 +16,17 @@ average_outage_counters = {}
 average_resources_used = {}
 number_of_training_routines_per_model = 10
 out = 10
-number_of_tests = 1
-# qth_range =[0.25, 0.35, 0.45, 0.55]
+number_of_tests = 5000
+qth_range =[0]
 # qth_range = [0.8, 0.999] #for testing
 # qth_range = [0.9] #for testing
-qth_range= [0.5] #for training
+# qth_range= [0.5] #for training
 phase_shift = 0.1
 #qth_range = [0.00001]
-epochs = 1
-epoch_size = 1
-resources = [10]
-model_prefix_names = ["fin_coef_loss","binary_cross_entropy"]
+epochs = 20
+epoch_size = 150
+resources = [4]
+model_prefix_names = ["binary_cross_entropy"]
 force_retrain_models = True
 temperature_value = 0 #used 10 before
 
@@ -35,7 +35,7 @@ for qth in qth_range:
     for lstm_size in [32]:
         for resource in resources:
             for model_prefix in model_prefix_names:
-                for rate_threshold in [1.05]:
+                for rate_threshold in [0.5]:
                     model_result = f"{model_prefix}_rt-{rate_threshold}_r-{resource}_qth--{qth}_lstm-{lstm_size}_out-{out}_phase-{phase_shift}"
                     model_name = model_prefix
                     average_outage_counters[model_result] = 0

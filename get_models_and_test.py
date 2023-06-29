@@ -3,6 +3,7 @@ import tensorflow as tf
 import numpy as np
 from data_generator import OutageData
 from outage_loss import InfiniteOutageCoefficientLoss
+from outage_loss import FiniteOutageCoefficientLoss
 import dqn_lstm
 
 

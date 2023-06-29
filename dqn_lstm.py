@@ -16,8 +16,8 @@ from tensorflow.keras.losses import MeanSquaredError
 from tensorflow.keras.losses import BinaryCrossentropy
 from tensorflow.keras.losses import MeanAbsoluteError
 from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint
-#from outage_loss import InfiniteOutageCoefficientLoss
-#from outage_loss import FiniteOutageCoefficientLoss
+from outage_loss import InfiniteOutageCoefficientLoss
+from outage_loss import FiniteOutageCoefficientLoss
 
 
 

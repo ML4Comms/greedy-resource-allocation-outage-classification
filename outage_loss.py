@@ -52,22 +52,3 @@ class FiniteOutageCoefficientLoss(InfiniteOutageCoefficientLoss):
         y_pred_element = y_pred
         M = self.M(y_true_element, y_pred_element)
         return M - tf.multiply(tf.pow(self.q(y_true_element, y_pred_element), self.S - 1), M - 1)
-
-if __name__ == "__main__":
-    loss = InfiniteOutageCoefficientLoss()
-    path_name = "fin_coef_loss_model_rt-1.05_b-5_lstm-32"
-    inputs = {
-                                "taps": 1024,
-                                "padding": 0,
-                                "input_size": 100,
-                                "output_size": 10,
-                                "batch_size": 5,
-                                "epoch_size": 1,
-                                "phase_shift": 0.1,
-                                "rate_threshold": 1.05
-                            }
-    training_generator = OutageData(**inputs,)
-    multi_lstm_model = tf.keras.models.load_model(path_name, compile = False)
-    X, y = training_generator.__getitem__(0)
-    print(multi_lstm_model.predict(X))
-    print(y)

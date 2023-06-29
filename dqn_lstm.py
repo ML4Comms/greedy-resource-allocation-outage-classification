@@ -42,7 +42,7 @@ class DQNLSTM:
         model = Sequential()
         model.add(LSTM(32, input_shape=(self.input_shape[1], self.input_shape[2]),return_sequences= False))
         model.add(Dense(10, activation='PReLU'))
-        model.add(Dense(2,activation='sigmoid'))  # Use the first element of output_shape as the number of units
+        model.add(Dense(1,activation='sigmoid'))  # Use the first element of output_shape as the number of units
         path = f"models/{self.loss_name}"
         if self.force_retrain or not os.path.exists(path):
             if self.loss_name == 'mse':

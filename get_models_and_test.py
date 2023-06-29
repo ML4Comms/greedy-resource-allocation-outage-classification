@@ -32,7 +32,7 @@ force_retrain_models = True
 for qth in qth_range:
     for resource in resources:
         for loss_name in loss_names:
-            for rate_threshold in [2.0]:# 0.02,0.5,1.0,1.5,2.0
+            for rate_threshold in [2.0]:
                 model_result = f"{loss_name}_rt-{rate_threshold}_r-{resources}_qth--{qth}_out-{out}_phase-{phase_shift}"
                 model_name = loss_name
                 average_outage_counters[model_result] = 0
@@ -64,14 +64,14 @@ for qth in qth_range:
                     P_inf_counter = 0
                     cdf_counter = 0
                     
-                    dqn_lstm = DQNLSTM(qth,batch_size=batch_size,epochs=num_epochs,data_config=data_config,loss_name=loss_name)#training
+                    dqn_lstm = DQNLSTM(qth,batch_size=batch_size,epochs=num_epochs,data_config=data_config,loss_name=loss_name)
                       
                     for _ in range(number_of_tests):
                         X, y_label = training_generator.__getitem__(0)
                         #dqn_lstm.model.fit(X,y_label)
                         #rewards = dqn_lstm.train_model()                        
 
-                        Y_pred = dqn_lstm.model.predict(X) # call the function from the previous code
+                        Y_pred = dqn_lstm.model.predict(X) 
 
                         resource_used = 0
                             
@@ -95,11 +95,11 @@ for qth in qth_range:
                                 
                             resource_used = idx
                             if idx == resource-1:
-                                if y_label[idx][0] >= 0.5: #bi=0, which meanslabel predicts outage so allocate becoz last state
+                                if y_label[idx][0] >= 0.5: 
                                     P_R[model_result] += 1.0
                                 break
-                            elif y_pred[0] <= qth: #predictor says no outage
-                                if y_label[idx][0] >= 0.5: # label predicts outage- basically doesn't matter what label says here predictor has made is decision
+                            elif y_pred[0] <= qth: 
+                                if y_label[idx][0] >= 0.5: 
                                     P_R[model_result] += 1.0
                                 break
                             else:

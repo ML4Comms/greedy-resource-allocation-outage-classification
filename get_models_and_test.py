@@ -3,8 +3,7 @@ import tensorflow as tf
 import numpy as np
 from data_generator import OutageData
 from outage_loss import InfiniteOutageCoefficientLoss
-import toy_models
-
+import dqn_lstm
 
 
 cdf = {}
@@ -18,26 +17,21 @@ number_of_training_routines_per_model = 10
 out = 10
 number_of_tests = 5000
 qth_range =[0]
-# qth_range = [0.8, 0.999] #for testing
-# qth_range = [0.9] #for testing
-# qth_range= [0.5] #for training
 phase_shift = 0.1
-#qth_range = [0.00001]
 epochs = 20
 epoch_size = 150
 resources = [4]
-model_prefix_names = ["binary_cross_entropy"]
+loss_names = ["fin_coef_loss","bce","mse","mae"] 
 force_retrain_models = True
 temperature_value = 0 #used 10 before
 
 
 for qth in qth_range:
-    for lstm_size in [32]:
-        for resource in resources:
-            for model_prefix in model_prefix_names:
-                for rate_threshold in [0.5]:
-                    model_result = f"{model_prefix}_rt-{rate_threshold}_r-{resource}_qth--{qth}_lstm-{lstm_size}_out-{out}_phase-{phase_shift}"
-                    model_name = model_prefix
+    for resource in resources:
+        for loss_name in loss_names:
+            for rate_threshold in [0.5]:
+                model_result = f"{loss_name}_rt-{rate_threshold}_r-{resources}_qth--{qth}_out-{out}_phase-{phase_shift}"
+                    model_name = loss_name
                     average_outage_counters[model_result] = 0
                     average_resources_used[model_result] = 0
                     
@@ -67,16 +61,11 @@ for qth in qth_range:
                         cdf_counter = 0
                         
                         
-                        multi_lstm_model = toy_models.get_fitted_model(data_input=data_config, 
-                                                                        model_name=model_name, 
-                                                                        epochs=epochs, 
-                                                                        force_retrain = force_retrain_models, 
-                                                                        lstm_units=lstm_size,
-                                                                        qth=0.5)
+                        dqn_lstm = DQNLSTM(qth,batch_size=batch_size,epochs=num_epochs,data_config=data_config,loss_name=loss_name)
 
                         for _ in range(number_of_tests):
                             X, y_label = training_generator.__getitem__(0)
-                            Y_pred = multi_lstm_model.predict(X)
+                            Y_pred = dqn_lstm.model.predict(X)
 
                             resource_used = 0
                             

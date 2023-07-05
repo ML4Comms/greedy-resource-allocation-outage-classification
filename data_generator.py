@@ -76,10 +76,10 @@ class OutageData(FrequencyResponseGenerator):
         # X, [0, 1] success follows
         # X, [1, 0] outage follows
         X, y = self.get_data(index)
-        y = tf.reduce_mean(tf.multiply(y,y), axis = 1) #mean squared magnitude of the output samples
+        y = tf.math.log(1 + tf.math.square(tf.math.abs(y,y))) / tf.math.log(2.0)
         reshape_vector = [self.batch_size, 1]
-        y = tf.reshape(y, reshape_vector)
-        success = tf.cast(tf.math.log(1+y) / tf.math.log(2.0) > self.rate_threshold, tf.float32)
+        success = tf.cast(tf.reduce_mean(y, axis = 1) > self.rate_threshold, tf.float32)
+        success = tf.reshape(success, reshape_vector)
         return X, 1-success
 
 

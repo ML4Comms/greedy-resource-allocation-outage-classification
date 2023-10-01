@@ -11,6 +11,7 @@ cdf = {}
 P_inf = {}
 P_1 = {}
 P_R = {}
+P_best_N = {}
 resources_used = {}
 average_outage_counters = {}
 average_resources_used = {}
@@ -55,6 +56,7 @@ for qth in qth_range:
                                 }
                         training_generator = OutageData(**data_config,)
 
+                        P_best_N[model_result] = 0.0
                         P_R[model_result] = 0.0
                         resources_used[model_result] = 0.0
                        
@@ -72,7 +74,10 @@ for qth in qth_range:
                                                                         epochs=epochs, 
                                                                         force_retrain = force_retrain_models, 
                                                                         lstm_units=lstm_size,
-                                                                        qth=0.5)
+                                                                        qth=qth)
+
+                        lowest_y_pred = float('inf')  # Set to infinity initially so any value will be lower
+                        best_of_N_in_outage = False
 
                         for _ in range(number_of_tests):
                             X, y_label = training_generator.__getitem__(0)
@@ -80,6 +85,7 @@ for qth in qth_range:
 
                             resource_used = 0
                             
+                            should_count = True
                             # Loop over the pre-calibrated outputs
                             for idx, y_pred in enumerate(Y_pred):
                                
@@ -95,23 +101,34 @@ for qth in qth_range:
                                     P_inf_counter += 1
                                     P_inf[model_result] += float(y_label[idx][0])
                                 
-                                
                                 resource_used = idx
-                                if idx == resource-1:
+                                if should_count:
+                                    if idx == resource-1:
+                                        if y_label[idx][0] >= 0.5:
+                                            P_R[model_result] += 1.0
+                                            should_count = False
+                                    elif y_pred[0] <= qth:
+                                        if y_label[idx][0] >= 0.5:
+                                            P_R[model_result] += 1.0
+                                            should_count = False
+                                    else:
+                                        continue
+
+                                if y_pred[0] < lowest_y_pred:
+                                    lowest_y_pred = y_pred[0]
+
                                     if y_label[idx][0] >= 0.5:
-                                        P_R[model_result] += 1.0
-                                    break
-                                elif y_pred[0] <= qth:
-                                    if y_label[idx][0] >= 0.5:
-                                        P_R[model_result] += 1.0
-                                    break
-                                else:
-                                    continue
+                                        best_of_N_in_outage = True
+                                    else:
+                                        best_of_N_in_outage = False
+
+                            if best_of_N_in_outage:
+                                P_best_N[model_result] += 1.0
 
                             resources_used[model_result] += resource_used
                             # print(f"{model_result}, "f"Test {_}:", f"Used sub-band number {resource_used}")
                        
-
+                        P_best_N[model_result] = P_best_N[model_result] / number_of_tests
                         P_R[model_result] = P_R[model_result] / number_of_tests
                         average_outage_counters[model_result]+=P_R[model_result]
                         resources_used[model_result] = resources_used[model_result] / number_of_tests
@@ -126,6 +143,8 @@ for qth in qth_range:
                             convert_file.write(f"\nEpochs: {epochs}, qth: {qth}, Number of tests: {number_of_tests}\n")
                             convert_file.write("\n\nP_R:\n")
                             convert_file.write(json.dumps(P_R, indent=4))
+                            convert_file.write("\n\nP_Best_N:\n")
+                            convert_file.write(json.dumps(P_best_N, indent=4))
                             convert_file.write("\n\nAverage number of sub-bands used:\n")
                             convert_file.write(json.dumps(resources_used, indent=4))
                             convert_file.write("\n=====================================\n")

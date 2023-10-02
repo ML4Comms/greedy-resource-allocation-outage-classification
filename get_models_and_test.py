@@ -111,8 +111,6 @@ for qth in qth_range:
                                         if y_label[idx][0] >= 0.5:
                                             P_R[model_result] += 1.0
                                             should_count = False
-                                    else:
-                                        continue
 
                                 if y_pred[0] < lowest_y_pred:
                                     lowest_y_pred = y_pred[0]

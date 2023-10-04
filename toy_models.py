@@ -61,7 +61,8 @@ def get_fitted_model(data_input,
                     qth: float,
                     epochs: int = 2, 
                     force_retrain: bool = False,
-                    lstm_units: int = 32):
+                    lstm_units: int = 32,
+                    batch_size: int = 32):
     # TODO In relation to the above "weird" comment, this needs fixing here
     training_generator = OutageData(**data_input)
     path = f"models/{model_name}"
@@ -102,7 +103,7 @@ def get_fitted_model(data_input,
             return DummyModel()
 
         callback = tf.keras.callbacks.EarlyStopping(monitor='loss', patience=epochs, restore_best_weights=True)
-        history = model.fit(training_generator, epochs=epochs,
+        history = model.fit(training_generator, epochs=epochs,batch_size = batch_size,
                             callbacks=[callback])
         model.save(path)
         return model

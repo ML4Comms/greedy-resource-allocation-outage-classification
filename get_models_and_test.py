@@ -29,6 +29,7 @@ epoch_size = 150
 resources = [4]
 model_prefix_names = ["binary_cross_entropy"]
 force_retrain_models = True
+#batch_size = 32
 temperature_value = 0 #used 10 before
 
 
@@ -49,7 +50,7 @@ for qth in qth_range:
                                     "padding": 0,
                                     "input_size": 100,
                                     "output_size": out,
-                                    "batch_size": resource,
+                                    "resources": resource,
                                     "epoch_size": epoch_size,
                                     "phase_shift": phase_shift,
                                     "rate_threshold": rate_threshold

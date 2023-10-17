@@ -5,33 +5,54 @@ from data_generator import OutageData
 from outage_loss import InfiniteOutageCoefficientLoss
 import toy_models
 
+def bubble_sort_indices(arr):
+    n = len(arr)
+    indices = list(range(n))
+    for i in range(n-1):
+        for j in range(0, n-i-1):
+            # Swap if the element found is greater
+            # than the next element
+            if arr[indices[j]] > arr[indices[j+1]]:
+                indices[j], indices[j+1] = indices[j+1], indices[j]
+    return indices
+
+def mean_of_values_at_indices(arr, indices):
+    # Summing values at provided indices
+    total = sum(arr[i] for i in indices)
+    # Compute the mean
+    return total / len(indices)
 
 
 cdf = {}
 P_inf = {}
 P_1 = {}
+P_R_critical = {}
 P_R = {}
 P_best_N = {}
 resources_used = {}
+P_R_critical_average_outage_counters = {}
 P_R_average_outage_counters = {}
 best_N_average_outage_counters = {}
 P_1_average_outage_counters = {}
 P_inf_average_outage_counters = {}
 cdf_average_outage_counters = {}
 average_resources_used = {}
-number_of_training_routines_per_model = 8
+number_of_training_routines_per_model = 9
+number_to_discard = 3
 out = 10
-number_of_tests = 6000
+number_of_tests = 12000
 #qth_range =[0]
 # qth_range = [0.8, 0.999] #for testing
 # qth_range = [0.9] #for testing
 qth_range= [0.5] #for training
 phase_shift = 0.1
 #qth_range = [0.00001]
-epochs = 40
-epoch_size = 200
-resources = [4]
-model_prefix_names = ["fin_coef_loss","binary_cross_entropy","mse"]
+epochs = 20
+epoch_size = 150
+resources = [8]
+rates = [0.1, 0.9, 1.5, 2]
+# model_prefix_names = ["fin_coef_loss","binary_cross_entropy","mse","mae"]
+model_prefix_names = ["fin_coef_loss"]
 force_retrain_models = True
 temperature_value = 0 #used 10 before
 
@@ -40,15 +61,16 @@ for qth in qth_range:
     for lstm_size in [32]:
         for resource in resources:
             for model_prefix in model_prefix_names:
-                for rate_threshold in [0.2]:
+                for rate_threshold in rates:
                     model_result = f"{model_prefix}_rt-{rate_threshold}_r-{resource}_qth--{qth}_lstm-{lstm_size}_out-{out}_phase-{phase_shift}"
                     model_name = model_prefix
-                    P_R_average_outage_counters[model_result] = 0
-                    average_resources_used[model_result] = 0
-                    best_N_average_outage_counters[model_result] = 0
-                    P_inf_average_outage_counters[model_result] = 0
+                    P_R_critical_average_outage_counters[model_result] = []
+                    P_R_average_outage_counters[model_result] = []
+                    average_resources_used[model_result] = []
+                    best_N_average_outage_counters[model_result] = []
+                    P_inf_average_outage_counters[model_result] = []
                     P_1_average_outage_counters[model_result] = 0
-                    cdf_average_outage_counters[model_result] = 0
+                    cdf_average_outage_counters[model_result] = []
                     
                     
                     for _ in range(number_of_training_routines_per_model):
@@ -66,6 +88,7 @@ for qth in qth_range:
 
                         P_best_N[model_result] = 0.0
                         P_R[model_result] = 0.0
+                        P_R_critical[model_result] = 0.0
                         resources_used[model_result] = 0.0
                        
                         P_inf[model_result] = 0.0
@@ -119,12 +142,17 @@ for qth in qth_range:
                                     else:
                                         best_of_N_in_outage = False
 
-                                # P_R
+                                # P_R_critical and P_R
                                 if should_count:
                                     if idx == resource-1:
                                         resource_used = idx_of_best
-                                        P_R[model_result] += int(best_of_N_in_outage)
+                                        P_R_critical[model_result] += float(best_of_N_in_outage)
                                     elif y_pred[0] <= qth:
+                                        resource_used = idx
+                                        should_count = False
+                                        if y_label[idx][0] >= 0.5:
+                                            P_R_critical[model_result] += 1.0
+                                    if(idx == resource-1 or y_pred[0] <= qth):
                                         resource_used = idx
                                         should_count = False
                                         if y_label[idx][0] >= 0.5:
@@ -138,22 +166,25 @@ for qth in qth_range:
                             # print(f"{model_result}, "f"Test {_}:", f"Used sub-band number {resource_used}")
                        
                         P_best_N[model_result] = P_best_N[model_result] / number_of_tests
-                        best_N_average_outage_counters[model_result]+=P_best_N[model_result]
+                        best_N_average_outage_counters[model_result].append(P_best_N[model_result])
 
                         P_R[model_result] = P_R[model_result] / number_of_tests
-                        P_R_average_outage_counters[model_result]+=P_R[model_result]
+                        P_R_average_outage_counters[model_result].append(P_R[model_result])
+
+                        P_R_critical[model_result] = P_R_critical[model_result] / number_of_tests
+                        P_R_critical_average_outage_counters[model_result].append(P_R_critical[model_result])
 
                         resources_used[model_result] = resources_used[model_result] / number_of_tests
-                        average_resources_used[model_result]+=resources_used[model_result]
+                        average_resources_used[model_result].append(resources_used[model_result])
 
                         P_1[model_result] = P_1[model_result] / P_1_counter
                         P_1_average_outage_counters[model_result] += P_1[model_result]
 
                         P_inf[model_result] = (0 if P_inf_counter ==0 else P_inf[model_result] / P_inf_counter)
-                        P_inf_average_outage_counters[model_result] += P_inf[model_result]
+                        P_inf_average_outage_counters[model_result].append(P_inf[model_result])
 
                         cdf[model_result] = cdf[model_result] / cdf_counter
-                        cdf_average_outage_counters[model_result]+=cdf[model_result]
+                        cdf_average_outage_counters[model_result].append(cdf[model_result])
 
                         with open(f'simulation_results_{resource}_{model_prefix}_nbest.txt', 'a') as convert_file:
                             convert_file.write("\nData configuration:\n")
@@ -161,6 +192,8 @@ for qth in qth_range:
                             convert_file.write(f"\nEpochs: {epochs}, qth: {qth}, Number of tests: {number_of_tests}\n")
                             convert_file.write("\n\nP_R:\n")
                             convert_file.write(json.dumps(P_R, indent=4))
+                            convert_file.write("\n\nP_R_critical:\n")
+                            convert_file.write(json.dumps(P_R_critical, indent=4))
                             convert_file.write("\n\nP_Best_N:\n")
                             convert_file.write(json.dumps(P_best_N, indent=4))
                             convert_file.write("\n\nAverage number of sub-bands used:\n")
@@ -180,17 +213,22 @@ for qth in qth_range:
                             convert_file.write("\n=====================================\n")
 
                                                        
-                    P_R_average_outage_counters[model_result] = P_R_average_outage_counters[model_result] / number_of_training_routines_per_model
-                    best_N_average_outage_counters[model_result] = best_N_average_outage_counters[model_result] / number_of_training_routines_per_model
-                    P_inf_average_outage_counters[model_result] = P_inf_average_outage_counters[model_result] / number_of_training_routines_per_model
-                    average_resources_used[model_result] = average_resources_used[model_result] / number_of_training_routines_per_model
-                    P_1_average_outage_counters[model_result] = P_1_average_outage_counters[model_result] / number_of_training_routines_per_model
-                    cdf_average_outage_counters[model_result] = cdf_average_outage_counters[model_result] / number_of_training_routines_per_model
+                    indices_to_average = bubble_sort_indices(P_R_average_outage_counters[model_result])[0:max(number_of_training_routines_per_model-number_to_discard,1)]
+                    
+                    P_R_average_outage_counters[model_result] = mean_of_values_at_indices(P_R_average_outage_counters[model_result], indices_to_average)
+                    P_R_critical_average_outage_counters[model_result] = mean_of_values_at_indices(P_R_critical_average_outage_counters[model_result], indices_to_average)
+                    best_N_average_outage_counters[model_result] = mean_of_values_at_indices(best_N_average_outage_counters[model_result], indices_to_average)
+                    P_inf_average_outage_counters[model_result] = mean_of_values_at_indices(P_inf_average_outage_counters[model_result], indices_to_average)
+                    average_resources_used[model_result] = mean_of_values_at_indices(average_resources_used[model_result], indices_to_average)
+                    P_1_average_outage_counters[model_result] = P_1_average_outage_counters[model_result] / number_of_training_routines_per_model # P1 doesn't depend on model so no need to remove anomolies
+                    cdf_average_outage_counters[model_result] = mean_of_values_at_indices(cdf_average_outage_counters[model_result], indices_to_average)
                     with open(f'final_results.txt', 'w') as convert_file:
                         convert_file.write("P_1:\n")
                         convert_file.write(json.dumps(P_1_average_outage_counters, indent=4))
                         convert_file.write("\n\nP_R:\n")
                         convert_file.write(json.dumps(P_R_average_outage_counters, indent=4))
+                        convert_file.write("\n\nP_R_critical:\n")
+                        convert_file.write(json.dumps(P_R_critical_average_outage_counters, indent=4))
                         convert_file.write("\n\nP_Best_N:\n")
                         convert_file.write(json.dumps(best_N_average_outage_counters, indent=4))
                         convert_file.write("\n\nP_inf:\n")
@@ -203,4 +241,3 @@ for qth in qth_range:
                         convert_file.write("*************************************")
                         convert_file.write("\n=====================================\n\n")
 
-               

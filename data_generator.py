@@ -3,12 +3,14 @@ import matplotlib.pyplot as plt
 
 
 class FrequencyResponseGenerator(tf.keras.utils.Sequence):
-    def __init__(self, taps: int, padding: int = 100, phase_shift: float = 0.1, batch_size: int = 1, epoch_size: int = 1000, input_size: int = 100, output_size: int = 10):
+    def __init__(self, taps: int, padding: int = 100, phase_shift: float = 0.1, batch_size: int = 1, epoch_size: int = 1000, input_size: int = 100, output_size: int = 10, snr: float = 1.0):
         self.signal_length = padding + taps
 
         assert(self.signal_length >= batch_size)
+        assert(snr > 0)
 
-        time_doman_samples = tf.complex(tf.random.normal((1, taps), mean = 0, stddev = tf.sqrt(1/float(taps))), tf.random.normal((1, taps), mean = 0, stddev = tf.sqrt(1/float(taps))))
+        self.snr = float(snr)
+        time_doman_samples = tf.complex(tf.sqrt(float(self.snr)), 0.0) * tf.complex(tf.random.normal((1, taps), mean = 0, stddev = tf.sqrt(1/float(taps))), tf.random.normal((1, taps), mean = 0, stddev = tf.sqrt(1/float(taps))))
         padding_signal = tf.complex(tf.zeros((1, padding)), tf.zeros((1, padding)))
 
         self.padded_signal = tf.concat([time_doman_samples, padding_signal], 1)
@@ -69,9 +71,9 @@ class FrequencyResponseGenerator(tf.keras.utils.Sequence):
         return self.epoch_size
 
 class OutageData(FrequencyResponseGenerator):
-    def __init__(self, rate_threshold: float, taps: int, padding: int = 100, phase_shift: float = 0.1, batch_size: int = 1, epoch_size: int = 1000, input_size: int = 100, output_size: int = 10):
+    def __init__(self, rate_threshold: float, taps: int, padding: int = 100, phase_shift: float = 0.1, batch_size: int = 1, epoch_size: int = 1000, input_size: int = 100, output_size: int = 10, snr: float = 1.0):
         self.rate_threshold = rate_threshold
-        super().__init__(taps, padding, phase_shift, batch_size, epoch_size, input_size, output_size)
+        super().__init__(taps, padding=padding, phase_shift=phase_shift, batch_size=batch_size, epoch_size=epoch_size, input_size=input_size, output_size=output_size, snr=snr)
     def __getitem__(self, index):
         # X, [0, 1] success follows
         # X, [1, 0] outage follows

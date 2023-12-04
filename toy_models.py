@@ -111,8 +111,6 @@ def get_fitted_model(data_input,
         model = get_model(data_input, 
                     model_name, 
                     qth,
-                    epochs, 
-                    force_retrain,
                     lstm_units)
 
         callback = tf.keras.callbacks.EarlyStopping(monitor='loss', patience=epochs, restore_best_weights=True)

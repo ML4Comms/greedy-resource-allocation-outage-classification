@@ -1,6 +1,39 @@
 import tensorflow as tf
 from data_generator import OutageData
 
+def heaviside(x):
+    return tf.experimental.numpy.heaviside(x,0)
+
+def TPR(qth, y_true, y_pred, step_function = heaviside):
+    result = generalise_TP(qth, y_true, y_pred, step_function) / (generalise_TP(qth, y_true, y_pred, step_function) + generalise_FN(qth, y_true, y_pred, step_function))
+    if tf.math.is_nan(result):
+        return tf.constant(0)
+    else:
+        return result
+
+def FPR(qth, y_true, y_pred, step_function = heaviside):
+    result = generalise_FP(qth, y_true, y_pred, step_function) / (generalise_FP(qth, y_true, y_pred, step_function) + generalise_TN(qth, y_true, y_pred, step_function))
+    if tf.math.is_nan(result):
+        return tf.constant(0)
+    else:
+        return result
+    
+def Precision(qth, y_true, y_pred, step_function = heaviside):
+    result = generalise_TP(qth, y_true, y_pred, step_function) / (generalise_TP(qth, y_true, y_pred, step_function) + generalise_FP(qth, y_true, y_pred, step_function))
+    if tf.math.is_nan(result):
+        return tf.constant(0)
+    else:
+        return result
+
+def generalise_TN(qth, y_true, y_pred, step_function = heaviside):
+    return tf.reduce_sum(tf.multiply(step_function(qth - y_pred), 1.0 - y_true))
+def generalise_FN(qth, y_true, y_pred, step_function = heaviside):
+    return tf.reduce_sum(tf.multiply(step_function(qth - y_pred), y_true))
+def generalise_TP(qth, y_true, y_pred, step_function = heaviside):
+    return tf.reduce_sum(tf.multiply(step_function(y_pred - qth), y_true))
+def generalise_FP(qth, y_true, y_pred, step_function = heaviside):
+    return tf.reduce_sum(tf.multiply(step_function(y_pred - qth), 1.0 - y_true))
+
 
 class MeanSquaredErrorTemperature(tf.keras.losses.Loss):
     def __init__(self, reduction=tf.keras.losses.Reduction.AUTO, name=None):
@@ -18,13 +51,13 @@ class InfiniteOutageCoefficientLoss(tf.keras.losses.Loss):
         return tf.divide(1, 1 + tf.math.exp(tf.multiply(-factor, input)))
 
     def TN(self, y_true, y_pred):
-        return tf.reduce_sum(tf.multiply(self.squashed_sigmoid(self.qth - y_pred), 1.0 - y_true))
+        return generalise_TN(qth=self.qth, y_true=y_true, y_pred=y_pred, step_function=self.squashed_sigmoid)
     def FN(self, y_true, y_pred):
-        return tf.reduce_sum(tf.multiply(self.squashed_sigmoid(self.qth - y_pred), y_true))
+        return generalise_FN(qth= self.qth, y_true=y_true, y_pred=y_pred, step_function=self.squashed_sigmoid)
     def TP(self, y_true, y_pred):
-        return tf.reduce_sum(tf.multiply(self.squashed_sigmoid(y_pred - self.qth), y_true))
+        return generalise_TP(qth=self.qth, y_true=y_true, y_pred=y_pred, step_function=self.squashed_sigmoid)
     def FP(self, y_true, y_pred):
-        return tf.reduce_sum(tf.multiply(self.squashed_sigmoid(y_pred - self.qth), 1.0 - y_true))
+        return generalise_FP(qth=self.qth, y_true=y_true, y_pred=y_pred, step_function=self.squashed_sigmoid)
 
     def M(self, y_true, y_pred):
         epsilon = 0.0001

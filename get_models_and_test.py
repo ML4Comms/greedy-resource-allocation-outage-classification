@@ -2,7 +2,7 @@ import json
 import tensorflow as tf
 import numpy as np
 from data_generator import OutageData
-from outage_loss import InfiniteOutageCoefficientLoss
+from outage_loss import InfiniteOutageCoefficientLoss, TPR, FPR, Precision
 import toy_models
 
 def bubble_sort_indices(arr):
@@ -29,6 +29,9 @@ P_1 = {}
 P_R_critical = {}
 P_R = {}
 P_best_N = {}
+tpr = {}
+fpr = {}
+precision = {}
 resources_used = {}
 P_R_critical_average_outage_counters = {}
 P_R_average_outage_counters = {}
@@ -37,24 +40,29 @@ P_1_average_outage_counters = {}
 P_inf_average_outage_counters = {}
 cdf_average_outage_counters = {}
 average_resources_used = {}
-number_of_training_routines_per_model = 8
-number_to_discard = 1
+tpr_average_outage_counters = {}
+fpr_average_outage_counters = {}
+precision_average_outage_counters = {}
+number_of_training_routines_per_model = 4
+number_to_discard = 0
 out = 10
-number_of_tests = 8
-SNRs = [0.1, 0.3, 1.0, 3.0]
-#qth_range =[0]
+number_of_tests = 8000
+# SNRs = [0.1, 0.35, 1.0, 3.5, 10.0]
+SNRs = [1.0]
+qth_range =[0.00001]
 # qth_range = [0.8, 0.999] #for testing
 # qth_range = [0.9] #for testing
-qth_range= [0.5] #for training
+# qth_range= [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.999] #for training
 phase_shift = 0.1
 #qth_range = [0.00001]
-epochs = 2
-epoch_size = 10
+epochs = 30
+epoch_size = 150
 resources = [4]
-rates = [1.5, 2]
-model_prefix_names = ["fin_coef_loss","binary_cross_entropy","mse","mae"]
-model_prefix_names = ["fin_coef_loss","binary_cross_entropy","mse"]
-# model_prefix_names = ["binary_cross_entropy","mse"]
+rates = [0.5]
+#model_prefix_names = ["fin_coef_loss","binary_cross_entropy","mse"]
+# model_prefix_names = ["mse"]
+# model_prefix_names = ["mse"]
+model_prefix_names = ["binary_cross_entropy"]
 force_retrain_models = True
 temperature_value = 0 #used 10 before
 
@@ -65,7 +73,8 @@ for snr in SNRs:
                 for model_prefix in model_prefix_names:
                     for rate_threshold in rates:
                         model_result = f"{model_prefix}_snr-{snr}_rt-{rate_threshold}_r-{resource}_qth--{qth}_lstm-{lstm_size}_out-{out}_phase-{phase_shift}"
-                        model_name = model_prefix
+                        model_name = f"{model_prefix}_snr-{snr}_rt-{rate_threshold}_r-{resource}_qth--{0.5}_lstm-{lstm_size}_out-{out}_phase-{phase_shift}"
+
                         P_R_critical_average_outage_counters[model_result] = []
                         P_R_average_outage_counters[model_result] = []
                         average_resources_used[model_result] = []
@@ -74,6 +83,10 @@ for snr in SNRs:
                         P_1_average_outage_counters[model_result] = 0
                         cdf_average_outage_counters[model_result] = []
                         
+                        tpr_average_outage_counters[model_result] = []
+                        fpr_average_outage_counters[model_result] = []
+                        precision_average_outage_counters[model_result] = []
+
                         
                         for _ in range(number_of_training_routines_per_model):
                             data_config = {
@@ -93,6 +106,9 @@ for snr in SNRs:
                             P_R[model_result] = 0.0
                             P_R_critical[model_result] = 0.0
                             resources_used[model_result] = 0.0
+                            tpr[model_result] = 0.0
+                            fpr[model_result] = 0.0
+                            precision[model_result] = 0.0
                         
                             P_inf[model_result] = 0.0
                             cdf[model_result] = 0.0
@@ -108,7 +124,7 @@ for snr in SNRs:
                                                                             epochs=epochs, 
                                                                             force_retrain = force_retrain_models, 
                                                                             lstm_units=lstm_size,
-                                                                            qth=qth)
+                                                                            qth=0.5)
 
 
                             for _ in range(number_of_tests):
@@ -122,9 +138,12 @@ for snr in SNRs:
                                 best_of_N_in_outage = False
                                 idx_of_best = 0
                                 # Loop over the pre-calibrated outputs
+                                tpr[model_result] += TPR(qth=qth, y_pred=Y_pred, y_true=y_label).numpy()
+                                fpr[model_result] += FPR(qth=qth, y_pred=Y_pred, y_true=y_label).numpy()
+                                precision[model_result] += Precision(qth=qth, y_pred=Y_pred, y_true=y_label).numpy()
                                 for idx, y_pred in enumerate(Y_pred):
                                 
-                                # P1 calculation
+                                    # P1 calculation
                                     P_1_counter += 1
                                     P_1[model_result] += float(y_label[idx][0])
                                         
@@ -174,6 +193,15 @@ for snr in SNRs:
                             P_R[model_result] = P_R[model_result] / number_of_tests
                             P_R_average_outage_counters[model_result].append(P_R[model_result])
 
+                            tpr[model_result] = tpr[model_result] / number_of_tests
+                            tpr_average_outage_counters[model_result].append(tpr[model_result])
+
+                            fpr[model_result] = fpr[model_result] / number_of_tests
+                            fpr_average_outage_counters[model_result].append(fpr[model_result])
+
+                            precision[model_result] = precision[model_result] / number_of_tests
+                            precision_average_outage_counters[model_result].append(precision[model_result])
+
                             P_R_critical[model_result] = P_R_critical[model_result] / number_of_tests
                             P_R_critical_average_outage_counters[model_result].append(P_R_critical[model_result])
 
@@ -195,6 +223,12 @@ for snr in SNRs:
                                 convert_file.write(f"\nEpochs: {epochs}, qth: {qth}, Number of tests: {number_of_tests}\n")
                                 convert_file.write("\n\nP_R:\n")
                                 convert_file.write(json.dumps(P_R, indent=4))
+                                convert_file.write("\n\nPRECISION:\n")
+                                convert_file.write(json.dumps(precision, indent=4))
+                                convert_file.write("\n\nTPR:\n")
+                                convert_file.write(json.dumps(tpr, indent=4))
+                                convert_file.write("\n\nFPR:\n")
+                                convert_file.write(json.dumps(fpr, indent=4))
                                 convert_file.write("\n\nP_R_critical:\n")
                                 convert_file.write(json.dumps(P_R_critical, indent=4))
                                 convert_file.write("\n\nP_Best_N:\n")
@@ -218,6 +252,10 @@ for snr in SNRs:
                                                         
                         indices_to_average = bubble_sort_indices(P_R_average_outage_counters[model_result])[0:max(number_of_training_routines_per_model-number_to_discard,1)]
                         
+                        precision_average_outage_counters[model_result] = mean_of_values_at_indices(precision_average_outage_counters[model_result], indices_to_average)
+                        tpr_average_outage_counters[model_result] = mean_of_values_at_indices(tpr_average_outage_counters[model_result], indices_to_average)
+                        fpr_average_outage_counters[model_result] = mean_of_values_at_indices(fpr_average_outage_counters[model_result], indices_to_average)
+                        
                         P_R_average_outage_counters[model_result] = mean_of_values_at_indices(P_R_average_outage_counters[model_result], indices_to_average)
                         P_R_critical_average_outage_counters[model_result] = mean_of_values_at_indices(P_R_critical_average_outage_counters[model_result], indices_to_average)
                         best_N_average_outage_counters[model_result] = mean_of_values_at_indices(best_N_average_outage_counters[model_result], indices_to_average)
@@ -232,6 +270,12 @@ for snr in SNRs:
                             convert_file.write(json.dumps(P_R_average_outage_counters, indent=4))
                             convert_file.write("\n\nP_R_critical:\n")
                             convert_file.write(json.dumps(P_R_critical_average_outage_counters, indent=4))
+                            convert_file.write("\n\nprecision_average_outage_counters:\n")
+                            convert_file.write(json.dumps(precision_average_outage_counters, indent=4))
+                            convert_file.write("\n\ntpr_average_outage_counters:\n")
+                            convert_file.write(json.dumps(tpr_average_outage_counters, indent=4))
+                            convert_file.write("\n\nfpr_average_outage_counters:\n")
+                            convert_file.write(json.dumps(fpr_average_outage_counters, indent=4))
                             convert_file.write("\n\nP_Best_N:\n")
                             convert_file.write(json.dumps(best_N_average_outage_counters, indent=4))
                             convert_file.write("\n\nP_inf:\n")

@@ -55,6 +55,47 @@ def calibrate(data_input, model: TemperatureModel):
         opts = optimizer.minimize(compute_loss, var_list=[temp])
     return temp
 
+def get_model(data_input, 
+                model_name, 
+                qth: float,
+                lstm_units: int = 32):
+
+
+    model = TemperatureModel(output_size=data_input["output_size"], temp = 1, lstm_units=lstm_units)
+    print(f"Training model: {model_name}")
+    if "mse" in model_name:
+        model.compile(loss=tf.keras.losses.MeanSquaredError(),
+                        optimizer=tf.keras.optimizers.Adam(),
+                        metrics=[tf.keras.metrics.MeanAbsoluteError()])
+    elif "binary_cross_entropy" in model_name:
+        model.compile(loss=tf.keras.losses.BinaryCrossentropy(from_logits=False),
+                        optimizer=tf.keras.optimizers.Adam(),
+                            metrics=[tf.keras.metrics.Recall(), 
+                                    tf.keras.metrics.Precision(),
+                                    tf.keras.metrics.BinaryAccuracy(),
+                                    tf.keras.metrics.Accuracy()])
+    elif "mae" in model_name:
+        model.compile(loss=tf.keras.losses.MeanAbsoluteError(),
+                        optimizer=tf.keras.optimizers.Adam(),
+                        metrics=[tf.keras.metrics.MeanAbsoluteError()])
+    elif "inf_coef_loss" in model_name:
+        model.compile(loss=InfiniteOutageCoefficientLoss(qth= qth),
+                        optimizer=tf.keras.optimizers.Adam(),
+                            metrics=[tf.keras.metrics.Recall(), 
+                                    tf.keras.metrics.Precision(),
+                                    tf.keras.metrics.BinaryAccuracy(),
+                                    tf.keras.metrics.Accuracy()])
+    elif "fin_coef_loss" in model_name:
+        model.compile(loss=FiniteOutageCoefficientLoss(S = data_input["batch_size"], qth = qth),
+                        optimizer=tf.keras.optimizers.Adam(),
+                            metrics=[tf.keras.metrics.Recall(), 
+                                    tf.keras.metrics.Precision(),
+                                    tf.keras.metrics.BinaryAccuracy(),
+                                    tf.keras.metrics.Accuracy()])
+    elif "dummy" in model_name:
+        return DummyModel()
+    return model
+        
 
 def get_fitted_model(data_input, 
                     model_name, 
@@ -67,39 +108,10 @@ def get_fitted_model(data_input,
     path = f"models/{model_name}"
     if force_retrain or not os.path.exists(path):
         
-        model = TemperatureModel(output_size=data_input["output_size"], temp = 1, lstm_units=lstm_units)
-        print(f"Training model: {model_name}")
-        if "mse" in model_name:
-            model.compile(loss=tf.keras.losses.MeanSquaredError(),
-                            optimizer=tf.keras.optimizers.Adam(),
-                            metrics=[tf.keras.metrics.MeanAbsoluteError()])
-        elif "binary_cross_entropy" in model_name:
-            model.compile(loss=tf.keras.losses.BinaryCrossentropy(from_logits=False),
-                            optimizer=tf.keras.optimizers.Adam(),
-                            metrics=[tf.keras.metrics.Recall(), 
-                                    tf.keras.metrics.Precision(),
-                                    tf.keras.metrics.BinaryAccuracy(),
-                                    tf.keras.metrics.Accuracy()])
-        elif "mae" in model_name:
-            model.compile(loss=tf.keras.losses.MeanAbsoluteError(),
-                            optimizer=tf.keras.optimizers.Adam(),
-                            metrics=[tf.keras.metrics.MeanAbsoluteError()])
-        elif "inf_coef_loss" in model_name:
-            model.compile(loss=InfiniteOutageCoefficientLoss(qth= qth),
-                            optimizer=tf.keras.optimizers.Adam(),
-                            metrics=[tf.keras.metrics.Recall(), 
-                                    tf.keras.metrics.Precision(),
-                                    tf.keras.metrics.BinaryAccuracy(),
-                                    tf.keras.metrics.Accuracy()])
-        elif "fin_coef_loss" in model_name:
-            model.compile(loss=FiniteOutageCoefficientLoss(S = data_input["batch_size"], qth = qth),
-                            optimizer=tf.keras.optimizers.Adam(),
-                            metrics=[tf.keras.metrics.Recall(), 
-                                    tf.keras.metrics.Precision(),
-                                    tf.keras.metrics.BinaryAccuracy(),
-                                    tf.keras.metrics.Accuracy()])
-        elif "dummy" in model_name:
-            return DummyModel()
+        model = get_model(data_input, 
+                    model_name, 
+                    qth,
+                    lstm_units)
 
         callback = tf.keras.callbacks.EarlyStopping(monitor='loss', patience=epochs, restore_best_weights=True)
         history = model.fit(training_generator, epochs=epochs,

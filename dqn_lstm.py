@@ -19,7 +19,7 @@ data_config = {}
 
 class DQNLSTM:
     def __init__(self, qth:float,model_name=None, epochs=100,data_config= None,learning_rate=0.001,force_retrain: bool= False,lstm_units: int = 32):
-        self.input_shape = (data_config["resources"], data_config["input_size"], 1)
+        self.input_shape = (data_config["batch_size"], data_config["input_size"], 1)
         self.output_shape = (data_config["output_size"], 1)
         self.memory = []
         self.gamma = 0.9  # Discount factor
@@ -46,7 +46,7 @@ class DQNLSTM:
         if self.force_retrain or not os.path.exists(path):
             if 'mse' in self.model_name:
                 model.compile(loss=MeanSquaredError(), optimizer='adam',metrics=[tf.keras.metrics.MeanSquaredError()])
-            elif 'bce' in self.model_name:
+            elif 'binary_cross_entropy' in self.model_name:
                 model.compile(loss=BinaryCrossentropy(from_logits=False), optimizer='adam',metrics=[tf.keras.metrics.Recall(), 
                                     tf.keras.metrics.Precision(),
                                     tf.keras.metrics.BinaryAccuracy()])

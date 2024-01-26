@@ -1,9 +1,3 @@
-#!/usr/bin/env python
-# coding: utf-8
-
-# In[1]:
-
-
 import numpy as np
 from scipy.special import jn  # Importing the j0 function
 
@@ -57,10 +51,3 @@ for ps, p in zip(phase_shift, P_1):
 print("y1_j0_values:",y1_j0_values)
 print("y2_j0_values:",y2_j0_values)
 print("y3_j0_values:",y2_j0_values)
-
-
-# In[ ]:
-
-
-
-

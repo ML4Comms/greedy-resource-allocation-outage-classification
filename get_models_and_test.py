@@ -4,7 +4,6 @@ import numpy as np
 from data_generator import OutageData
 from outage_loss import InfiniteOutageCoefficientLoss, TPR, FPR, Precision
 import toy_models
-import dqn_lstm
 from dqn_lstm import DQNLSTM
 
 def bubble_sort_indices(arr):

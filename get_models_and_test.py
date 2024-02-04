@@ -4,6 +4,7 @@ import numpy as np
 from data_generator import OutageData
 from outage_loss import InfiniteOutageCoefficientLoss, TPR, FPR, Precision
 import toy_models
+from dqn_lstm import DQNLSTM
 
 def bubble_sort_indices(arr):
     n = len(arr)
@@ -100,6 +101,20 @@ for snr in SNRs:
                                         "rate_threshold": rate_threshold,
                                         "snr": snr
                                     }
+                            # user input
+                            use_model = input("Press 1 to use LSTM, any other key for DQN-LSTM: ")
+
+                            if use_model == '1':
+                                model = toy_models.get_fitted_model(data_input=data_config, 
+                                model_name=model_name, 
+                                epochs=epochs, 
+                                force_retrain=force_retrain_models, 
+                                lstm_units=lstm_size,
+                                qth=qth_range)
+
+                            else:
+                                model = DQNLSTM(qth,epochs=epochs,data_config=data_config,model_name=model_name,lstm_units=lstm_size)
+                            
                             training_generator = OutageData(**data_config,)
 
                             P_best_N[model_result] = 0.0
@@ -118,19 +133,10 @@ for snr in SNRs:
                             P_inf_counter = 0
                             cdf_counter = 0
                             
-                            
-                            multi_lstm_model = toy_models.get_fitted_model(data_input=data_config, 
-                                                                            model_name=model_name, 
-                                                                            epochs=epochs, 
-                                                                            force_retrain = force_retrain_models, 
-                                                                            lstm_units=lstm_size,
-                                                                            qth=0.5)
-
-
+                           
                             for _ in range(number_of_tests):
                                 X, y_label = training_generator.__getitem__(0)
-                                Y_pred = multi_lstm_model.predict(X)
-
+                                Y_pred = model.predict(X)
                                 resource_used = 0
                                 
                                 should_count = True
@@ -286,5 +292,3 @@ for snr in SNRs:
                             convert_file.write(json.dumps(average_resources_used, indent=4))
                             convert_file.write("\n\n=====================================\n")
                             convert_file.write("*************************************")
-                            convert_file.write("\n=====================================\n\n")
-

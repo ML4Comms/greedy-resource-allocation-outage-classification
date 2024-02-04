@@ -102,6 +102,20 @@ for snr in SNRs:
                                         "rate_threshold": rate_threshold,
                                         "snr": snr
                                     }
+                            # user input
+                            use_model = input("Press 1 to use LSTM, any other key for DQN-LSTM: ")
+
+                            if use_model == '1':
+                                model = toy_models.get_fitted_model(data_input=data_config, 
+                                model_name=model_name, 
+                                epochs=epochs, 
+                                force_retrain=force_retrain_models, 
+                                lstm_units=lstm_size,
+                                qth=qth_range)
+
+                            else:
+                                model = DQNLSTM(qth,epochs=epochs,data_config=data_config,model_name=model_name,lstm_units=lstm_size)
+                            
                             training_generator = OutageData(**data_config,)
 
                             P_best_N[model_result] = 0.0
@@ -120,14 +134,13 @@ for snr in SNRs:
                             P_inf_counter = 0
                             cdf_counter = 0
                             
-                            
-                            dqn_lstm = DQNLSTM(qth,epochs=epochs,data_config=data_config,model_name=model_name,lstm_units=lstm_size)
-
-
+                           
                             for _ in range(number_of_tests):
                                 X, y_label = training_generator.__getitem__(0)
-                                Y_pred = dqn_lstm.model.predict(X)
-
+                                if isinstance(model, DQNLSTM):
+                                    Y_pred = model.model.predict(X)  # Use model.model for DQNLSTM instances
+                                else:
+                                    Y_pred = model.predict(X)
                                 resource_used = 0
                                 
                                 should_count = True
@@ -283,4 +296,3 @@ for snr in SNRs:
                             convert_file.write(json.dumps(average_resources_used, indent=4))
                             convert_file.write("\n\n=====================================\n")
                             convert_file.write("*************************************")
-                            convert_file.write("\n=====================================\n\n")

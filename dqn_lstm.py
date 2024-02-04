@@ -18,7 +18,7 @@ data_config = {}
 
 
 class DQNLSTM:
-    def __init__(self, qth:float,model_name=None, epochs=100,data_config= None,learning_rate=0.001,force_retrain: bool= False,lstm_units: int = 32):
+    def __init__(self, qth:float,model_name=None, epochs=100,data_config= None,learning_rate=0.001,force_retrain: bool= True,lstm_units: int = 32):
         self.input_shape = (data_config["batch_size"], data_config["input_size"], 1)
         self.output_shape = (data_config["output_size"], 1)
         self.memory = []
@@ -89,6 +89,10 @@ class DQNLSTM:
             self.model.fit(state, target_full, epochs=1, verbose=1)
         if self.epsilon > self.epsilon_min:
             self.epsilon *= self.epsilon_decay
+
+    def predict(self, *args, **kwargs):
+        # Directly call the predict method of the encapsulated Keras model
+        return self.model.predict(*args, **kwargs)
 
     def train(self, X, y_label, num_episodes=1000, batch_size=32):
         rewards = []

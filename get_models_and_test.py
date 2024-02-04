@@ -136,10 +136,7 @@ for snr in SNRs:
                            
                             for _ in range(number_of_tests):
                                 X, y_label = training_generator.__getitem__(0)
-                                if isinstance(model, DQNLSTM):
-                                    Y_pred = model.model.predict(X)  # Use model.model for DQNLSTM instances
-                                else:
-                                    Y_pred = model.predict(X)
+                                Y_pred = model.predict(X)
                                 resource_used = 0
                                 
                                 should_count = True

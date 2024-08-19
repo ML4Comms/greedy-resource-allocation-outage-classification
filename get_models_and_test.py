@@ -104,6 +104,42 @@ elif nll_choice == '3':
     nll_function = lambda y_true, y_pred_probs, epsilon=1e-5: DQNLSTM.calculate_weighted_nll(y_true, y_pred_probs, qth, epsilon=epsilon, weight_factor=weight_factor)
 
 
+scaling_method = input("Enter the scaling method ('platt', 'temp', 'beta', 'isotonic','none'): ").strip().lower()
+
+set_params = False
+if scaling_method != 'none':
+    set_params = input(f"Do you want to set hard values for {scaling_method} scaling? (yes/no): ").strip().lower() == 'yes'
+
+if scaling_method == 'platt' and set_params:
+    platt_A = float(input("Enter Platt scaling coefficient A: "))
+    platt_B = float(input("Enter Platt scaling coefficient B: "))
+
+elif scaling_method == 'temp' and set_params:
+    temp_T = float(input("Enter Temperature scaling parameter T: "))
+
+elif scaling_method == 'beta' and set_params:
+    beta_a = float(input("Enter Beta scaling parameter a: "))
+    beta_b = float(input("Enter Beta scaling parameter b: "))
+    beta_c = float(input("Enter Beta scaling parameter c: "))
+
+# Prompt for model type once
+use_model = input("Press 1 to use LSTM, any other key for DQN-LSTM: ")
+
+# Select NLL Function
+nll_choice = input("Choose NLL calculation: 1 - Standard, 2 - Critical Only, 3 - Weighted: ").strip()
+if nll_choice == '1':
+    nll_function = DQNLSTM.calculate_binary_nll
+    qth = None
+    weight_factor = None
+elif nll_choice == '2':
+    qth = float(input("Enter the threshold qth for critical NLL: "))
+    nll_function = lambda y_true, y_pred_probs, epsilon=1e-5: DQNLSTM.calculate_modified_nll(y_true, y_pred_probs, qth, critical_only=True, epsilon=epsilon)
+    weight_factor = None
+elif nll_choice == '3':
+    qth = float(input("Enter the threshold qth for weighted NLL: "))
+    weight_factor = float(input("Enter weight factor for critical predictions: "))
+    nll_function = lambda y_true, y_pred_probs, epsilon=1e-5: DQNLSTM.calculate_weighted_nll(y_true, y_pred_probs, qth, epsilon=epsilon, weight_factor=weight_factor)
+
 for snr in SNRs:
     for qth in qth_range:
         for lstm_size in [32]:

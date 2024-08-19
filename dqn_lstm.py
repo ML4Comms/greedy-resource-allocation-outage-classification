@@ -53,7 +53,7 @@ class DQNLSTM:
             elif 'mae' in self.model_name:
                 model.compile(loss=MeanAbsoluteError(), optimizer='adam', metrics=[tf.keras.metrics.MeanAbsoluteError()])
             elif "fin_coef_loss" in self.model_name:
-                model.compile(loss=FiniteOutageCoefficientLoss(S=self.data_config["resources"], qth=self.qth), optimizer='adam',metrics=[tf.keras.metrics.Recall(), 
+                model.compile(loss=FiniteOutageCoefficientLoss(S=self.data_config["batch_size"], qth=self.qth), optimizer='adam',metrics=[tf.keras.metrics.Recall(), 
                                     tf.keras.metrics.Precision(),
                                     tf.keras.metrics.BinaryAccuracy(),
                                     tf.keras.metrics.Accuracy()])
@@ -121,3 +121,125 @@ class DQNLSTM:
                 print(f"Episode: {episode + 1}, Total Reward: {total_reward}")
 
         return rewards
+    @staticmethod
+    def calculate_binary_nll(y_true, y_pred_probs, epsilon=1e-5):
+        """Calculate Binary Negative Log-Likelihood (NLL)."""
+        y_pred_probs = tf.clip_by_value(y_pred_probs, epsilon, 1 - epsilon)
+        return -tf.reduce_mean(y_true * tf.math.log(y_pred_probs) + (1 - y_true) * tf.math.log(1 - y_pred_probs))
+
+    @staticmethod
+    def calculate_modified_nll(y_true, y_pred_probs, qth, critical_only=False, epsilon=1e-5):
+        """Calculate NLL for predictions above a certain threshold if critical_only is True."""
+        y_pred_probs = tf.clip_by_value(y_pred_probs, epsilon, 1 - epsilon)
+        if critical_only:
+            mask = y_pred_probs >= qth
+            if not tf.reduce_any(mask):
+                return tf.constant(float('nan'))
+            y_true = tf.boolean_mask(y_true, mask)
+            y_pred_probs = tf.boolean_mask(y_pred_probs, mask)
+
+        if tf.size(y_true) == 0:
+            return tf.constant(float('nan'))
+
+        return -tf.reduce_mean(y_true * tf.math.log(y_pred_probs) + (1 - y_true) * tf.math.log(1 - y_pred_probs))
+
+    @staticmethod
+    def calculate_weighted_nll(y_true, y_pred_probs, qth, epsilon=1e-5, weight_factor=10):
+        """Calculate weighted NLL where predictions above qth are given more weight."""
+        y_pred_probs = tf.clip_by_value(y_pred_probs, epsilon, 1 - epsilon)
+        weights = tf.where(y_pred_probs >= qth, weight_factor, 1)
+        return -tf.reduce_mean(weights * (y_true * tf.math.log(y_pred_probs) + (1 - y_true) * tf.math.log(1 - y_pred_probs)))
+
+    def calibrate(self, data_input, method='platt', nll_function=calculate_binary_nll):
+        temp = tf.Variable(initial_value=1.0, trainable=True, dtype=tf.float32)
+        training_generator = OutageData(**data_input)
+        optimizer = tf.optimizers.Adam(learning_rate=0.0005)
+        
+        if method == 'temp':
+            def compute_temp_loss(y_pred, y):
+                y_pred_model_w_temp = y_pred / temp
+                loss = nll_function(tf.convert_to_tensor(y, dtype=tf.float32), tf.convert_to_tensor(y_pred_model_w_temp, dtype=tf.float32))
+                return loss
+
+            for i in range(10000):
+                X, y = training_generator.__getitem__(0)
+                y_pred = self.model.predict(X)
+
+                with tf.GradientTape() as tape:
+                    loss = compute_temp_loss(y_pred, y)
+                grads = tape.gradient(loss, [temp])
+                optimizer.apply_gradients(zip(grads, [temp]))
+
+                if i % 1000 == 0:
+                    print(f"Iteration {i}, Temperature: {temp.numpy()}, Loss: {loss.numpy()}")
+
+            self.temp = temp.numpy()
+            return self.temp
+
+        elif method == 'platt':
+            all_y_true = []
+            all_y_pred = []
+            for _ in range(10000):
+                X, y = training_generator.__getitem__(0)
+                y_pred = self.model.predict(X)
+                all_y_true.extend(y)
+                all_y_pred.extend(y_pred)
+
+            lr = LogisticRegression()
+            lr.fit(np.array(all_y_pred).reshape(-1, 1), np.array(all_y_true).reshape(-1))
+            self.A = lr.coef_[0][0]
+            self.B = lr.intercept_[0]
+            return self.A, self.B
+
+        elif method == 'beta':
+            def nll_loss(params):
+                a, b, c = params
+                scaled_preds = 1 / (1 + np.exp(-a * np.log(np.array(all_y_pred)) - b * np.log(1 - np.array(all_y_pred)) - c))
+                return nll_function(tf.convert_to_tensor(np.array(all_y_true), dtype=tf.float32), tf.convert_to_tensor(scaled_preds, dtype=tf.float32))
+
+            all_y_true = []
+            all_y_pred = []
+            for _ in range(10000):
+                X, y = training_generator.__getitem__(0)
+                y_pred = self.model.predict(X)
+                all_y_true.extend(y)
+                all_y_pred.extend(y_pred)
+
+            result = minimize(nll_loss, x0=[1.0, 1.0, 0.0], bounds=[(0.01, 10), (0.01, 10), (-10, 10)])
+            self.a, self.b, self.c = result.x
+            return self.a, self.b, self.c
+        
+        elif method == 'isotonic':
+            all_y_true = []
+            all_y_pred = []
+            for _ in range(10000):
+                X, y = training_generator.__getitem__(0)
+                y_pred = self.model.predict(X)
+                all_y_true.extend(y)
+                all_y_pred.extend(y_pred)
+
+            # Ensure correct shapes
+            all_y_true = np.array(all_y_true).flatten()
+            all_y_pred = np.array(all_y_pred).flatten()
+            
+            print(f"Length of all_y_true: {len(all_y_true)}")
+            print(f"Length of all_y_pred: {len(all_y_pred)}")
+            
+            if len(all_y_true) != len(all_y_pred):
+                raise ValueError("The lengths of all_y_true and all_y_pred do not match.")
+            
+            # Remove NaN or infinite values
+            valid_mask = np.isfinite(all_y_true) & np.isfinite(all_y_pred)
+            all_y_true = all_y_true[valid_mask]
+            all_y_pred = all_y_pred[valid_mask]
+            
+            ir = IsotonicRegression(out_of_bounds='clip')
+            self.isotonic_regressor = ir.fit(all_y_pred, all_y_true)
+            return self.isotonic_regressor
+
+        else:
+            raise ValueError(f"Invalid calibration method: {method}")
+    def isotonic_predict(self, y_pred):
+        if self.isotonic_regressor is None:
+            raise ValueError("Isotonic regressor is not trained. Please run calibrate method with 'isotonic' option first.")
+        return self.isotonic_regressor.transform(y_pred)

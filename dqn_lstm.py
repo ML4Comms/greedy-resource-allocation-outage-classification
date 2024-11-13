@@ -127,13 +127,6 @@ class DQNLSTM:
         y_pred_probs = tf.clip_by_value(y_pred_probs, epsilon, 1 - epsilon)
         return -tf.reduce_mean(y_true * tf.math.log(y_pred_probs) + (1 - y_true) * tf.math.log(1 - y_pred_probs))
 
-
-    def calculate_weighted_nll(y_true, y_pred_probs, qth, epsilon=1e-5, weight_factor=10):
-        """Calculate weighted NLL where predictions above qth are given more weight."""
-        y_pred_probs = tf.clip_by_value(y_pred_probs, epsilon, 1 - epsilon)
-        weights = tf.where(y_pred_probs >= qth, weight_factor, 1)
-        return -tf.reduce_mean(weights * (y_true * tf.math.log(y_pred_probs) + (1 - y_true) * tf.math.log(1 - y_pred_probs)))
-
     def calibrate(self, data_input, method='platt', nll_function=calculate_binary_nll):
         temp = tf.Variable(initial_value=1.0, trainable=True, dtype=tf.float32)
         training_generator = OutageData(**data_input)

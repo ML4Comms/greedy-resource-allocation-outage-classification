@@ -1,8 +1,15 @@
+#!/usr/bin/env python
+# coding: utf-8
+
+# In[1]:
+
+
 import json
 import tensorflow as tf
 import numpy as np
 from data_generator import OutageData
 from outage_loss import InfiniteOutageCoefficientLoss, TPR, FPR, Precision
+import dqn_lstm
 import toy_models
 from dqn_lstm import DQNLSTM
 
@@ -44,101 +51,23 @@ average_resources_used = {}
 tpr_average_outage_counters = {}
 fpr_average_outage_counters = {}
 precision_average_outage_counters = {}
-number_of_training_routines_per_model = 10
+number_of_training_routines_per_model = 1
 number_to_discard = 0
 out = 10
-number_of_tests = 9000
-# SNRs = [0.1, 0.35, 1.0, 3.5, 10.0]
-SNRs = [1.0] 
-qth_range =[0.1]
-# qth_range = [0.8, 0.999] #for testing
-# qth_range = [0.9] #for testing
-# qth_range= [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.999] #for training
+number_of_tests = 6
+SNRs = [10.0]#FOR SNR =1 its 2000; for 8 its 6000
+qth_range = [0.1]
 phase_shift = 0.1
-#qth_range = [0.00001]
-epochs = 30
-epoch_size = 150
+epochs = 3
+epoch_size = 10
 resources = [4]
 rates = [0.5]
-#model_prefix_names = ["fin_coef_loss","binary_cross_entropy","mse"]
-# model_prefix_names = ["mse"]
-# model_prefix_names = ["mse"]
-model_prefix_names = ["fin_coef_loss","binary_cross_entropy"]
+model_prefix_names = ["fin_coef_loss"]
 force_retrain_models = True
-#temperature_value = 0 #used 10 before
-
-scaling_method = input("Enter the scaling method ('platt', 'temp', 'beta', 'isotonic','none'): ").strip().lower()
-
-set_params = False
-if scaling_method != 'none':
-    set_params = input(f"Do you want to set hard values for {scaling_method} scaling? (yes/no): ").strip().lower() == 'yes'
-
-if scaling_method == 'platt' and set_params:
-    platt_A = float(input("Enter Platt scaling coefficient A: "))
-    platt_B = float(input("Enter Platt scaling coefficient B: "))
-
-elif scaling_method == 'temp' and set_params:
-    temp_T = float(input("Enter Temperature scaling parameter T: "))
-
-elif scaling_method == 'beta' and set_params:
-    beta_a = float(input("Enter Beta scaling parameter a: "))
-    beta_b = float(input("Enter Beta scaling parameter b: "))
-    beta_c = float(input("Enter Beta scaling parameter c: "))
-
+temperature_value = 0 #used 10 before
 # Prompt for model type once
 use_model = input("Press 1 to use LSTM, any other key for DQN-LSTM: ")
 
-# Select NLL Function
-nll_choice = input("Choose NLL calculation: 1 - Standard, 2 - Critical Only, 3 - Weighted: ").strip()
-if nll_choice == '1':
-    nll_function = DQNLSTM.calculate_binary_nll
-    qth = None
-    weight_factor = None
-elif nll_choice == '2':
-    qth = float(input("Enter the threshold qth for critical NLL: "))
-    nll_function = lambda y_true, y_pred_probs, epsilon=1e-5: DQNLSTM.calculate_modified_nll(y_true, y_pred_probs, qth, critical_only=True, epsilon=epsilon)
-    weight_factor = None
-elif nll_choice == '3':
-    qth = float(input("Enter the threshold qth for weighted NLL: "))
-    weight_factor = float(input("Enter weight factor for critical predictions: "))
-    nll_function = lambda y_true, y_pred_probs, epsilon=1e-5: DQNLSTM.calculate_weighted_nll(y_true, y_pred_probs, qth, epsilon=epsilon, weight_factor=weight_factor)
-
-
-scaling_method = input("Enter the scaling method ('platt', 'temp', 'beta', 'isotonic','none'): ").strip().lower()
-
-set_params = False
-if scaling_method != 'none':
-    set_params = input(f"Do you want to set hard values for {scaling_method} scaling? (yes/no): ").strip().lower() == 'yes'
-
-if scaling_method == 'platt' and set_params:
-    platt_A = float(input("Enter Platt scaling coefficient A: "))
-    platt_B = float(input("Enter Platt scaling coefficient B: "))
-
-elif scaling_method == 'temp' and set_params:
-    temp_T = float(input("Enter Temperature scaling parameter T: "))
-
-elif scaling_method == 'beta' and set_params:
-    beta_a = float(input("Enter Beta scaling parameter a: "))
-    beta_b = float(input("Enter Beta scaling parameter b: "))
-    beta_c = float(input("Enter Beta scaling parameter c: "))
-
-# Prompt for model type once
-use_model = input("Press 1 to use LSTM, any other key for DQN-LSTM: ")
-
-# Select NLL Function
-nll_choice = input("Choose NLL calculation: 1 - Standard, 2 - Critical Only, 3 - Weighted: ").strip()
-if nll_choice == '1':
-    nll_function = DQNLSTM.calculate_binary_nll
-    qth = None
-    weight_factor = None
-elif nll_choice == '2':
-    qth = float(input("Enter the threshold qth for critical NLL: "))
-    nll_function = lambda y_true, y_pred_probs, epsilon=1e-5: DQNLSTM.calculate_modified_nll(y_true, y_pred_probs, qth, critical_only=True, epsilon=epsilon)
-    weight_factor = None
-elif nll_choice == '3':
-    qth = float(input("Enter the threshold qth for weighted NLL: "))
-    weight_factor = float(input("Enter weight factor for critical predictions: "))
-    nll_function = lambda y_true, y_pred_probs, epsilon=1e-5: DQNLSTM.calculate_weighted_nll(y_true, y_pred_probs, qth, epsilon=epsilon, weight_factor=weight_factor)
 
 for snr in SNRs:
     for qth in qth_range:
@@ -174,20 +103,18 @@ for snr in SNRs:
                                         "rate_threshold": rate_threshold,
                                         "snr": snr
                                     }
-                            # user input
-                            #use_model = input("Press 1 to use LSTM, any other key for DQN-LSTM: ")
-
+                            
                             if use_model == '1':
                                 model = toy_models.get_fitted_model(data_input=data_config, 
-                                model_name=model_name, 
-                                epochs=epochs, 
-                                force_retrain=force_retrain_models, 
-                                lstm_units=lstm_size,
-                                qth=qth_range)
-
+                                                                    model_name=model_name, 
+                                                                    epochs=epochs, 
+                                                                    force_retrain=force_retrain_models, 
+                                                                    lstm_units=lstm_size,
+                                                                    qth=qth_range)
                             else:
-                                model = DQNLSTM(qth,epochs=epochs,data_config=data_config,model_name=model_name,lstm_units=lstm_size)
-                            
+                                model = DQNLSTM(qth, epochs=epochs, data_config=data_config, model_name=model_name, lstm_units=lstm_size)
+
+                                
                             training_generator = OutageData(**data_config,)
 
                             P_best_N[model_result] = 0.0
@@ -206,34 +133,14 @@ for snr in SNRs:
                             P_inf_counter = 0
                             cdf_counter = 0
                             
-                            if scaling_method != 'none':
-                                if scaling_method == 'platt':
-                                    if set_params:
-                                        model.A, model.B = platt_A, platt_B
-                                    else:
-                                        model.calibrate(data_config, method=scaling_method, nll_function=nll_function)
-                                        platt_A, platt_B = model.A, model.B
-                                elif scaling_method == 'temp':
-                                    if set_params:
-                                        model.temp = temp_T
-                                    else:
-                                        model.calibrate(data_config, method=scaling_method, nll_function=nll_function)
-                                        temp_T = model.temp
-                                elif scaling_method == 'beta':
-                                    if set_params:
-                                        model.a, model.b, model.c = beta_a, beta_b, beta_c
-                                    else:
-                                        model.calibrate(data_config, method=scaling_method, nll_function=nll_function)
-                                        beta_a, beta_b, beta_c = model.a, model.b, model.c
-                                elif scaling_method == 'isotonic':
-                                    model.calibrate(data_config, method='isotonic')
-                                else:
-                                    model.calibrate(data_config, method=scaling_method)
                             
-                           
+                            dqn_lstm = DQNLSTM(qth,epochs=epochs,data_config=data_config,model_name=model_name,lstm_units=lstm_size)
+
+
                             for _ in range(number_of_tests):
                                 X, y_label = training_generator.__getitem__(0)
                                 Y_pred = model.predict(X)
+
                                 resource_used = 0
                                 
                                 should_count = True
@@ -262,7 +169,7 @@ for snr in SNRs:
                                     if y_pred[0] < lowest_y_pred:
                                         lowest_y_pred = y_pred[0]
                                         idx_of_best = idx
-                                        if y_label[idx][0] >= 0.001:
+                                        if y_label[idx][0] >= 0.5:
                                             best_of_N_in_outage = True
                                         else:
                                             best_of_N_in_outage = False
@@ -275,12 +182,12 @@ for snr in SNRs:
                                         elif y_pred[0] <= qth:
                                             resource_used = idx
                                             should_count = False
-                                            if y_label[idx][0] >= 0.001:
+                                            if y_label[idx][0] >= 0.5:
                                                 P_R_critical[model_result] += 1.0
                                         if(idx == resource-1 or y_pred[0] <= qth):
                                             resource_used = idx
                                             should_count = False
-                                            if y_label[idx][0] >= 0.001:
+                                            if y_label[idx][0] >= 0.5:
                                                 P_R[model_result] += 1.0
 
 
@@ -389,3 +296,11 @@ for snr in SNRs:
                             convert_file.write(json.dumps(average_resources_used, indent=4))
                             convert_file.write("\n\n=====================================\n")
                             convert_file.write("*************************************")
+                            convert_file.write("\n=====================================\n\n")
+
+
+# In[ ]:
+
+
+
+

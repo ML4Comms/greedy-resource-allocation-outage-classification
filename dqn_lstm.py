@@ -41,7 +41,9 @@ class DQNLSTM:
         model = Sequential()
         model.add(LSTM(self.lstm_units, input_shape=(self.input_shape[1], self.input_shape[2]),return_sequences= False))
         model.add(Dense(10, activation='PReLU'))
-        model.add(Dense(1,activation='sigmoid'))  # Use the first element of output_shape as the number of units
+        #model.add(Dense(1,activation='sigmoid'))  # Use the first element of output_shape as the number of units
+        #model.add(Dense(2,activation='softmax'))
+        model.add(Dense(2))
         path = f"models/{self.model_name}"
         if self.force_retrain or not os.path.exists(path):
             if 'mse' in self.model_name:
@@ -90,9 +92,34 @@ class DQNLSTM:
         if self.epsilon > self.epsilon_min:
             self.epsilon *= self.epsilon_decay
 
-    def predict(self, *args, **kwargs):
-        # Directly call the predict method of the encapsulated Keras model
-        return self.model.predict(*args, **kwargs)
+    def predict(self, X):
+        logits = self.model(X, training=False).numpy()  # Model already outputs probabilities due to softmax
+
+        if self.calibration_method == 'none':
+            logits = self.model(X, training=False).numpy()
+            probabilities = tf.nn.softmax(logits, axis=-1).numpy()
+            return probabilities[:, 0].reshape(-1, 1)
+
+        elif self.calibration_method == 'temp' and self.temp is not None:
+            # Temperature scaling: scale logits (probabilities in this case), then apply softmax
+            #logits = np.log(probabilities)  # Convert probabilities to logits
+            scaled_logits = logits / self.temp
+            scaled_probs = tf.nn.softmax(scaled_logits).numpy()
+            return scaled_probs[:, 0].reshape(-1, 1)  # Select probability of class 0
+
+        elif self.calibration_method == 'platt' and self.A is not None and self.B is not None:
+            # Apply Platt scaling (usually on a single logit for binary tasks)
+            logits_class_0 = np.log(probabilities[:, 0] / (1 - probabilities[:, 0]))  # Convert probabilities to logits for class 0
+            calibrated_logits = self.A * logits_class_0 + self.B
+            return tf.nn.sigmoid(calibrated_logits).numpy().reshape(-1, 1)  # Convert to probability using sigmoid
+
+        elif self.calibration_method == 'isotonic' and self.isotonic_regressor is not None:
+            logits_0 = logits[:, 0]
+            logits_0_ = logits_0.reshape(-1,1)
+            class_0_probs  = tf.nn.sigmoid(logits_0_).numpy()
+            #class_0_probs = probabilities[:, 0]  # Select class 0 probabilities as a 1D array
+            calibrated_probs = self.isotonic_regressor.transform(class_0_probs)  # Apply isotonic regression
+            return np.array(calibrated_probs).reshape(-1, 1)
 
     def train(self, X, y_label, num_episodes=1000, batch_size=32):
         rewards = []
@@ -162,6 +189,7 @@ class DQNLSTM:
                 all_y_true.extend(y)
                 all_y_pred.extend(y_pred)
 
+            logits = np.log(all_y_pred / (1 - all_y_pred))  # Convert probabilities to logits
             lr = LogisticRegression()
             lr.fit(np.array(all_y_pred).reshape(-1, 1), np.array(all_y_true).reshape(-1))
             self.A = lr.coef_[0][0]

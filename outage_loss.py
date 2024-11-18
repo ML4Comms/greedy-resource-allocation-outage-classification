@@ -81,8 +81,8 @@ class FiniteOutageCoefficientLoss(InfiniteOutageCoefficientLoss):
         return tf.divide(numerator, denominator)
 
     def call(self, y_true, y_pred):
-        y_true_element = y_true
-        y_pred_element = y_pred
+        y_true_element = y_true[0]
+        y_pred_element = y_pred[0]
         M = self.M(y_true_element, y_pred_element)
         return M - tf.multiply(tf.pow(self.q(y_true_element, y_pred_element), self.S - 1), M - 1)
 

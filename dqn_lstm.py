@@ -41,7 +41,7 @@ class DQNLSTM:
         model = Sequential()
         model.add(LSTM(self.lstm_units, input_shape=(self.input_shape[1], self.input_shape[2]),return_sequences= False))
         model.add(Dense(10, activation='PReLU'))
-        model.add(Dense(1,activation='sigmoid'))  # Use the first element of output_shape as the number of units
+        #model.add(Dense(1,activation='sigmoid'))  # Use the first element of output_shape as the number of units
         #model.add(Dense(2,activation='softmax'))
         model.add(Dense(2))
         path = f"models/{self.model_name}"

@@ -64,9 +64,27 @@ resources = [4]
 rates = [0.5]
 model_prefix_names = ["fin_coef_loss"]
 force_retrain_models = True
-temperature_value = 0 #used 10 before
-# Prompt for model type once
+
+scaling_method = input("Enter the scaling method ('platt', 'temp', 'beta', 'isotonic','none'): ").strip().lower()
+
+set_params = False
+if scaling_method != 'none':
+    set_params = input(f"Do you want to set hard values for {scaling_method} scaling? (yes/no): ").strip().lower() == 'yes'
+
+if scaling_method == 'platt' and set_params:
+    platt_A = float(input("Enter Platt scaling coefficient A: "))
+    platt_B = float(input("Enter Platt scaling coefficient B: "))
+
+elif scaling_method == 'temp' and set_params:
+    temp_T = float(input("Enter Temperature scaling parameter T: "))
+
+elif scaling_method == 'beta' and set_params:
+    beta_a = float(input("Enter Beta scaling parameter a: "))
+    beta_b = float(input("Enter Beta scaling parameter b: "))
+    beta_c = float(input("Enter Beta scaling parameter c: "))
+    
 use_model = input("Press 1 to use LSTM, any other key for DQN-LSTM: ")
+nll_function = DQNLSTM.calculate_binary_nll
 
 
 for snr in SNRs:
@@ -133,13 +151,38 @@ for snr in SNRs:
                             P_inf_counter = 0
                             cdf_counter = 0
                             
-                            
-                            dqn_lstm = DQNLSTM(qth,epochs=epochs,data_config=data_config,model_name=model_name,lstm_units=lstm_size)
+                            if scaling_method != 'none':
+                                if scaling_method == 'platt':
+                                    if set_params:
+                                        model.A, model.B = platt_A, platt_B
+                                    else:
+                                        model.calibrate(data_config, method=scaling_method, nll_function=nll_function)
+                                        platt_A, platt_B = model.A, model.B
+                                elif scaling_method == 'temp':
+                                    if set_params:
+                                        model.temp = temp_T
+                                    else:
+                                        model.calibrate(data_config, method=scaling_method, nll_function=nll_function)
+                                        temp_T = model.temp
+                                elif scaling_method == 'beta':
+                                    if set_params:
+                                        model.a, model.b, model.c = beta_a, beta_b, beta_c
+                                    else:
+                                        model.calibrate(data_config, method=scaling_method, nll_function=nll_function)
+                                        beta_a, beta_b, beta_c = model.a, model.b, model.c
+                                elif scaling_method == 'isotonic':
+                                    model.calibrate(data_config, method='isotonic')
+                                else:
+                                    model.calibrate(data_config, method=scaling_method)
+
+                            #dqn_lstm = DQNLSTM(qth,epochs=epochs,data_config=data_config,model_name=model_name,lstm_units=lstm_size)
 
 
                             for _ in range(number_of_tests):
                                 X, y_label = training_generator.__getitem__(0)
                                 Y_pred = model.predict(X)
+
+                                tf.print("New model output (Y_pred_new_model):", Y_pred)  # Debugging print statement
 
                                 resource_used = 0
                                 

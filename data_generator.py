@@ -82,7 +82,8 @@ class OutageData(FrequencyResponseGenerator):
         reshape_vector = [self.batch_size, 1]
         success = tf.cast(tf.reduce_mean(y, axis = 1) > self.rate_threshold, tf.float32)
         success = tf.reshape(success, reshape_vector)
-        return X, 1-success
+        #return X, 1-success
+        return X, tf.squeeze(tf.transpose(tf.convert_to_tensor([1-success, success])))
 
 
     def __len__(self):

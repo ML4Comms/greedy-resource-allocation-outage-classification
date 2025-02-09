@@ -12,13 +12,45 @@ from tensorflow.keras.losses import MeanAbsoluteError
 from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint
 from outage_loss import InfiniteOutageCoefficientLoss
 from outage_loss import FiniteOutageCoefficientLoss
+from sklearn.linear_model import LogisticRegression
+from sklearn.isotonic import IsotonicRegression
+from scipy.optimize import minimize
+from scipy.special import logit
+from betacal import BetaCalibration
 
 # TODO Make setting this less weird!
 data_config = {}
 
+# Define a global qth variable that is updated dynamically
+global_qth = tf.Variable(0.5, trainable=False, dtype=tf.float32)  # Start at qth = 0.5
+
+
+class QthUpdateCallback(tf.keras.callbacks.Callback):
+    def __init__(self, model_wrapper, data_config, step_size=0.01, threshold=1e-3):
+        super(QthUpdateCallback, self).__init__()
+        self.model_wrapper = model_wrapper  
+        self.data_config = data_config
+        self.step_size = step_size
+        self.threshold = threshold
+
+    def on_epoch_end(self, epoch, logs=None):
+        X, y_true = OutageData(**self.data_config).__getitem__(0)
+        y_pred = self.model_wrapper.model.predict(X)  
+
+        P_infty_estimate = self.model_wrapper.model.loss(y_true, y_pred)  
+        E_Q_less_qth = self.model_wrapper.compute_E_Q_less_qth()  
+        diff = abs(E_Q_less_qth - P_infty_estimate)
+
+        if diff > self.threshold:
+            if E_Q_less_qth > P_infty_estimate:
+                global_qth.assign(max(1e-5, global_qth - self.step_size))  
+            else:
+                global_qth.assign(min(0.5, global_qth + self.step_size))  
+
+        print(f"Epoch {epoch+1}: Updated qth = {global_qth.numpy():.5f}, |E[Q | Q < qth] - P_infty| = {diff:.6f}")
 
 class DQNLSTM:
-    def __init__(self, qth:float,model_name=None, epochs=100,data_config= None,learning_rate=0.001,force_retrain: bool= True,lstm_units: int = 32):
+    def __init__(self, model_name=None, epochs=100,data_config= None,learning_rate=0.001,force_retrain: bool= True,lstm_units: int = 32):
         self.input_shape = (data_config["batch_size"], data_config["input_size"], 1)
         self.output_shape = (data_config["output_size"], 1)
         self.memory = []
@@ -29,7 +61,6 @@ class DQNLSTM:
         self.model_name = model_name
         self.epochs = epochs
         self.data_config = data_config
-        self.qth = qth
         #self.batch_size = batch_size
         self.learning_rate = learning_rate
         self.force_retrain = force_retrain
@@ -53,7 +84,7 @@ class DQNLSTM:
             elif 'mae' in self.model_name:
                 model.compile(loss=MeanAbsoluteError(), optimizer='adam', metrics=[tf.keras.metrics.MeanAbsoluteError()])
             elif "fin_coef_loss" in self.model_name:
-                model.compile(loss=FiniteOutageCoefficientLoss(S=self.data_config["batch_size"], qth=self.qth), optimizer='adam',metrics=[tf.keras.metrics.Recall(), 
+                model.compile(loss=FiniteOutageCoefficientLoss(S=self.data_config["batch_size"]), optimizer='adam',metrics=[tf.keras.metrics.Recall(), 
                                     tf.keras.metrics.Precision(),
                                     tf.keras.metrics.BinaryAccuracy(),
                                     tf.keras.metrics.Accuracy()])
@@ -61,7 +92,7 @@ class DQNLSTM:
                 raise ValueError(f"Invalid loss name: {self.model_name}")
             print(f"Training model: {self.model_name}")
             training_generator = OutageData(**self.data_config)
-            callback = tf.keras.callbacks.EarlyStopping(monitor='loss', patience=self.epochs, restore_best_weights=True)
+            callback = QthUpdateCallback(self,self.data_config)
             history = model.fit(training_generator, epochs=self.epochs, callbacks=[callback])
             return model
         else:
@@ -93,6 +124,15 @@ class DQNLSTM:
     def predict(self, *args, **kwargs):
         # Directly call the predict method of the encapsulated Keras model
         return self.model.predict(*args, **kwargs)
+    
+    def compute_E_Q_less_qth(self):
+        #Computes E[Q | Q < qth] using the current model's predictions.
+        X, _ = OutageData(**self.data_config).__getitem__(0)
+        y_pred = self.model.predict(X)
+        mask = y_pred < global_qth.numpy()
+        if tf.reduce_sum(tf.cast(mask, tf.float32)) > 0:
+            return tf.reduce_mean(tf.boolean_mask(y_pred, mask)).numpy()
+        return 0  # Return zero if no values are below qth
 
     def train(self, X, y_label, num_episodes=1000, batch_size=32):
         rewards = []
@@ -121,27 +161,29 @@ class DQNLSTM:
                 print(f"Episode: {episode + 1}, Total Reward: {total_reward}")
 
         return rewards
+    
     @staticmethod
     def calculate_binary_nll(y_true, y_pred_probs, epsilon=1e-5):
         """Calculate Binary Negative Log-Likelihood (NLL)."""
         y_pred_probs = tf.clip_by_value(y_pred_probs, epsilon, 1 - epsilon)
         return -tf.reduce_mean(y_true * tf.math.log(y_pred_probs) + (1 - y_true) * tf.math.log(1 - y_pred_probs))
-
-    def calibrate(self, data_input, method='platt', nll_function=calculate_binary_nll):
+    
+    def calibrate(self, data_input, method='platt'):
         temp = tf.Variable(initial_value=1.0, trainable=True, dtype=tf.float32)
         training_generator = OutageData(**data_input)
         optimizer = tf.optimizers.Adam(learning_rate=0.0005)
         
         if method == 'temp':
-            def compute_temp_loss(y_pred, y):
-                y_pred_model_w_temp = y_pred / temp
-                loss = nll_function(tf.convert_to_tensor(y, dtype=tf.float32), tf.convert_to_tensor(y_pred_model_w_temp, dtype=tf.float32))
+            def compute_temp_loss(y_pred, y_true):
+                y_pred_logits = logit(y_pred)
+                scaled_logits = y_pred_logits / temp
+                # Compute cross-entropy loss
+                loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(labels=y_true, logits=scaled_logits))
                 return loss
 
             for i in range(10000):
                 X, y = training_generator.__getitem__(0)
                 y_pred = self.model.predict(X)
-
                 with tf.GradientTape() as tape:
                     loss = compute_temp_loss(y_pred, y)
                 grads = tape.gradient(loss, [temp])
@@ -161,19 +203,24 @@ class DQNLSTM:
                 y_pred = self.model.predict(X)
                 all_y_true.extend(y)
                 all_y_pred.extend(y_pred)
-
+                
+            all_y_true = np.array(all_y_true).flatten()  # Flattening to ensure correct shape
+            all_y_pred = np.array(all_y_pred).flatten()  # Flattening to ensure correct shape
+            
+            epsilon = 1e-10  # Safe threshold for float64
+            all_y_pred = np.clip(all_y_pred, epsilon, 1 - epsilon)  # Clip probabilities
+            
+            # Logistic regression for Platt scaling is applied on logits, not probabilities
+            logits = np.log(all_y_pred / (1 - all_y_pred))  # Convert probabilities to logits
             lr = LogisticRegression()
-            lr.fit(np.array(all_y_pred).reshape(-1, 1), np.array(all_y_true).reshape(-1))
-            self.A = lr.coef_[0][0]
-            self.B = lr.intercept_[0]
+            lr.fit(logits.reshape(-1, 1), all_y_true)  # Fit on logits, not probabilities
+            # Assign coefficients
+            self.A = lr.coef_[0][0]  # Slope
+            self.B = lr.intercept_[0]  # Intercept
+            print(f"Fitted Platt scaling coefficients: A = {self.A}, B = {self.B}")
             return self.A, self.B
 
         elif method == 'beta':
-            def nll_loss(params):
-                a, b, c = params
-                scaled_preds = 1 / (1 + np.exp(-a * np.log(np.array(all_y_pred)) - b * np.log(1 - np.array(all_y_pred)) - c))
-                return nll_function(tf.convert_to_tensor(np.array(all_y_true), dtype=tf.float32), tf.convert_to_tensor(scaled_preds, dtype=tf.float32))
-
             all_y_true = []
             all_y_pred = []
             for _ in range(10000):
@@ -182,9 +229,10 @@ class DQNLSTM:
                 all_y_true.extend(y)
                 all_y_pred.extend(y_pred)
 
-            result = minimize(nll_loss, x0=[1.0, 1.0, 0.0], bounds=[(0.01, 10), (0.01, 10), (-10, 10)])
-            self.a, self.b, self.c = result.x
-            return self.a, self.b, self.c
+            beta_calibrator = BetaCalibration(parameters="abm")
+            beta_calibrator.fit(all_y_pred, all_y_true)
+            self.beta_calibrator = beta_calibrator
+            return self.beta_calibrator
         
         elif method == 'isotonic':
             all_y_true = []
@@ -216,6 +264,7 @@ class DQNLSTM:
 
         else:
             raise ValueError(f"Invalid calibration method: {method}")
+            
     def isotonic_predict(self, y_pred):
         if self.isotonic_regressor is None:
             raise ValueError("Isotonic regressor is not trained. Please run calibrate method with 'isotonic' option first.")

@@ -1,38 +1,41 @@
 import tensorflow as tf
 from data_generator import OutageData
 
+# Define a global qth variable that will be dynamically updated
+global_qth = tf.Variable(0.5, trainable=False, dtype=tf.float32)  # Initial qth = 0.5
+
 def heaviside(x):
     return tf.experimental.numpy.heaviside(x,0)
 
-def TPR(qth, y_true, y_pred, step_function = heaviside):
-    result = generalise_TP(qth, y_true, y_pred, step_function) / (generalise_TP(qth, y_true, y_pred, step_function) + generalise_FN(qth, y_true, y_pred, step_function))
+def TPR(y_true, y_pred, step_function = heaviside):
+    result = generalise_TP(y_true, y_pred, step_function) / (generalise_TP(y_true, y_pred, step_function) + generalise_FN(y_true, y_pred, step_function))
     if tf.math.is_nan(result):
         return tf.constant(0)
     else:
         return result
 
-def FPR(qth, y_true, y_pred, step_function = heaviside):
-    result = generalise_FP(qth, y_true, y_pred, step_function) / (generalise_FP(qth, y_true, y_pred, step_function) + generalise_TN(qth, y_true, y_pred, step_function))
+def FPR(y_true, y_pred, step_function = heaviside):
+    result = generalise_FP( y_true, y_pred, step_function) / (generalise_FP(y_true, y_pred, step_function) + generalise_TN(y_true, y_pred, step_function))
     if tf.math.is_nan(result):
         return tf.constant(0)
     else:
         return result
     
-def Precision(qth, y_true, y_pred, step_function = heaviside):
-    result = generalise_TP(qth, y_true, y_pred, step_function) / (generalise_TP(qth, y_true, y_pred, step_function) + generalise_FP(qth, y_true, y_pred, step_function))
+def Precision(y_true, y_pred, step_function = heaviside):
+    result = generalise_TP(y_true, y_pred, step_function) / (generalise_TP(y_true, y_pred, step_function) + generalise_FP(y_true, y_pred, step_function))
     if tf.math.is_nan(result):
         return tf.constant(0)
     else:
         return result
 
-def generalise_TN(qth, y_true, y_pred, step_function = heaviside):
-    return tf.reduce_sum(tf.multiply(step_function(qth - y_pred), 1.0 - y_true))
-def generalise_FN(qth, y_true, y_pred, step_function = heaviside):
-    return tf.reduce_sum(tf.multiply(step_function(qth - y_pred), y_true))
-def generalise_TP(qth, y_true, y_pred, step_function = heaviside):
-    return tf.reduce_sum(tf.multiply(step_function(y_pred - qth), y_true))
-def generalise_FP(qth, y_true, y_pred, step_function = heaviside):
-    return tf.reduce_sum(tf.multiply(step_function(y_pred - qth), 1.0 - y_true))
+def generalise_TN(y_true, y_pred, step_function = heaviside):
+    return tf.reduce_sum(tf.multiply(step_function(global_qth - y_pred), 1.0 - y_true))
+def generalise_FN(y_true, y_pred, step_function = heaviside):
+    return tf.reduce_sum(tf.multiply(step_function(global_qth - y_pred), y_true))
+def generalise_TP(y_true, y_pred, step_function = heaviside):
+    return tf.reduce_sum(tf.multiply(step_function(y_pred - global_qth), y_true))
+def generalise_FP(y_true, y_pred, step_function = heaviside):
+    return tf.reduce_sum(tf.multiply(step_function(y_pred - global_qth), 1.0 - y_true))
 
 
 class MeanSquaredErrorTemperature(tf.keras.losses.Loss):
@@ -43,21 +46,21 @@ class MeanSquaredErrorTemperature(tf.keras.losses.Loss):
         return self.M(y_true, y_pred)
 
 class InfiniteOutageCoefficientLoss(tf.keras.losses.Loss):
-    def __init__(self, reduction=tf.keras.losses.Reduction.AUTO, name=None, qth = 0.5):
-        self.qth = qth
+    def __init__(self, reduction=tf.keras.losses.Reduction.AUTO, name=None):
+        #self.qth = qth
         super().__init__(reduction, name)
 
     def squashed_sigmoid(self, input, factor: float = 5.0):
         return tf.divide(1, 1 + tf.math.exp(tf.multiply(-factor, input)))
 
     def TN(self, y_true, y_pred):
-        return generalise_TN(qth=self.qth, y_true=y_true, y_pred=y_pred, step_function=self.squashed_sigmoid)
+        return generalise_TN(y_true=y_true, y_pred=y_pred, step_function=self.squashed_sigmoid)
     def FN(self, y_true, y_pred):
-        return generalise_FN(qth= self.qth, y_true=y_true, y_pred=y_pred, step_function=self.squashed_sigmoid)
+        return generalise_FN(y_true=y_true, y_pred=y_pred, step_function=self.squashed_sigmoid)
     def TP(self, y_true, y_pred):
-        return generalise_TP(qth=self.qth, y_true=y_true, y_pred=y_pred, step_function=self.squashed_sigmoid)
+        return generalise_TP(y_true=y_true, y_pred=y_pred, step_function=self.squashed_sigmoid)
     def FP(self, y_true, y_pred):
-        return generalise_FP(qth=self.qth, y_true=y_true, y_pred=y_pred, step_function=self.squashed_sigmoid)
+        return generalise_FP(y_true=y_true, y_pred=y_pred, step_function=self.squashed_sigmoid)
 
     def M(self, y_true, y_pred):
         epsilon = 0.0001
@@ -69,10 +72,10 @@ class InfiniteOutageCoefficientLoss(tf.keras.losses.Loss):
         return self.M(y_true, y_pred)
 
 class FiniteOutageCoefficientLoss(InfiniteOutageCoefficientLoss):
-    def __init__(self, S: int, reduction=tf.keras.losses.Reduction.AUTO, name=None, qth = 0.5):
-        self.qth = qth
+    def __init__(self, S: int, reduction=tf.keras.losses.Reduction.AUTO, name=None):
+        #self.qth = qth
         self.S = S
-        super().__init__(reduction=tf.keras.losses.Reduction.AUTO, name=None, qth = 0.5)
+        super().__init__(reduction=tf.keras.losses.Reduction.AUTO, name=None)
 
     def q(self, y_true, y_pred):
         epsilon = 0.0001

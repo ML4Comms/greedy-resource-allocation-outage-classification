@@ -23,7 +23,9 @@ data_config = {}
 
 # Define a global qth variable that is updated dynamically
 global_qth = tf.Variable(0.5, trainable=False, dtype=tf.float32)  # Start at qth = 0.5
-
+p_infty_history = []
+E_Q_less_qth_history = []
+qth_history = [global_qth.numpy()]
 
 class QthUpdateCallback(tf.keras.callbacks.Callback):
     def __init__(self, model_wrapper, data_config, step_size=0.01, threshold=1e-3):
@@ -32,13 +34,18 @@ class QthUpdateCallback(tf.keras.callbacks.Callback):
         self.data_config = data_config
         self.step_size = step_size
         self.threshold = threshold
+        
 
     def on_epoch_end(self, epoch, logs=None):
         X, y_true = OutageData(**self.data_config).__getitem__(0)
         y_pred = self.model_wrapper.model.predict(X)  
 
         P_infty_estimate = self.model_wrapper.model.loss(y_true, y_pred)  
-        E_Q_less_qth = self.model_wrapper.compute_E_Q_less_qth()  
+        self.p_infty_history.append(P_infty_estimate)
+        
+        E_Q_less_qth = self.model_wrapper.compute_E_Q_less_qth()
+        E_Q_less_qth_history.append(E_Q_less_qth)  
+
         diff = abs(E_Q_less_qth - P_infty_estimate)
 
         if diff > self.threshold:
@@ -47,7 +54,11 @@ class QthUpdateCallback(tf.keras.callbacks.Callback):
             else:
                 global_qth.assign(min(0.5, global_qth + self.step_size))  
 
-        print(f"Epoch {epoch+1}: Updated qth = {global_qth.numpy():.5f}, |E[Q | Q < qth] - P_infty| = {diff:.6f}")
+        # Track updated qth
+        qth_history.append(global_qth.numpy())
+
+        print(f"Epoch {epoch+1}: Updated qth = {global_qth.numpy():.5f}, P_infty = {P_infty_estimate:.6f}, "
+              f"E[Q | Q < qth] = {E_Q_less_qth:.6f}, |E[Q | Q < qth] - P_infty| = {diff:.6f}")
 
 class DQNLSTM:
     def __init__(self, model_name=None, epochs=100,data_config= None,learning_rate=0.001,force_retrain: bool= True,lstm_units: int = 32):
@@ -91,6 +102,7 @@ class DQNLSTM:
             else:
                 raise ValueError(f"Invalid loss name: {self.model_name}")
             print(f"Training model: {self.model_name}")
+            self.model = model
             training_generator = OutageData(**self.data_config)
             callback = QthUpdateCallback(self,self.data_config)
             history = model.fit(training_generator, epochs=self.epochs, callbacks=[callback])
@@ -98,6 +110,7 @@ class DQNLSTM:
         else:
             print(f"Loading model: {self.model_name}")
             model = tf.keras.models.load_model(path, compile = False)
+            self.model = model
             return model
     
     def remember(self, state, action, reward, next_state, done):

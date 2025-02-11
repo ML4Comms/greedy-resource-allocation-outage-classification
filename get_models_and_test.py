@@ -11,9 +11,10 @@ from data_generator import OutageData
 from outage_loss import InfiniteOutageCoefficientLoss, TPR, FPR, Precision
 import dqn_lstm
 import toy_models
-from dqn_lstm import DQNLSTM
+from dqn_lstm import DQNLSTM, qth_history, p_infty_history, E_Q_less_qth_history
 from scipy.optimize import minimize
 from scipy.special import expit, logit
+import matplotlib.pyplot as plt
 
 def bubble_sort_indices(arr):
     n = len(arr)
@@ -57,7 +58,7 @@ number_of_training_routines_per_model = 1
 number_to_discard = 0
 out = 10
 number_of_tests = 6
-SNRs = [10.0]
+SNRs = [1.58]
 #qth_range = [0.1]
 phase_shift = 0.1
 epochs = 3
@@ -69,6 +70,27 @@ force_retrain_models = True
 temperature_value = 0 #used 10 before
 # Prompt for model type once
 use_model = input("Press 1 to use LSTM, any other key for DQN-LSTM: ")
+
+def plot_qth_p_infty_eq_qth(qth_history, p_infty_history, E_Q_less_qth_history):
+    epochs = range(1, len(qth_history) + 1)
+
+    plt.figure(figsize=(8, 5))
+
+    # Plot qth
+    plt.plot(epochs, qth_history, marker='o', linestyle='-', color='g', label="qth (Threshold)")
+
+    # Plot E[Q | Q < qth]
+    plt.plot(epochs[:-1], E_Q_less_qth_history, marker='s', linestyle='-', color='b', label="E[Q | Q < qth]")
+
+    # Plot P_infty
+    plt.plot(epochs[:-1], p_infty_history, marker='x', linestyle='--', color='r', label="P_infty")
+
+    plt.xlabel("Epochs")
+    plt.ylabel("Values")
+    plt.title("qth, P_infty, and E[Q | Q < qth] over Epochs")
+    plt.legend()
+    plt.grid()
+    plt.show()
 
 global_qth = tf.Variable(0.5, trainable=False, dtype=tf.float32)  # Start at qth = 0.5
 
@@ -132,7 +154,7 @@ for snr in SNRs:
                             else:
                                 model = DQNLSTM(epochs=epochs, data_config=data_config, model_name=model_name, lstm_units=lstm_size)
 
-                                
+                            plot_qth_p_infty_eq_qth(qth_history, p_infty_history, E_Q_less_qth_history)   
                             training_generator = OutageData(**data_config,)
 
                             P_best_N[model_result] = 0.0

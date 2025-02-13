@@ -23,6 +23,43 @@ data_config = {}
 
 # Define a global qth variable that is updated dynamically
 global_qth = tf.Variable(0.5, trainable=False, dtype=tf.float32)  # Start at qth = 0.5
+# Initialize empty lists to track values per epoch (for plotting later)
+p_infty_history = []
+E_Q_less_qth_history = []
+qth_history = []
+
+class QthUpdateCallback(tf.keras.callbacks.Callback):
+    def __init__(self, model_wrapper, step_size=0.01, threshold=1e-3):
+        super().__init__()
+        self.model_wrapper = model_wrapper  
+        self.step_size = step_size
+        self.threshold = threshold
+
+    def on_epoch_end(self, epoch, logs=None):
+        global global_qth, p_infty_history, E_Q_less_qth_history, qth_history
+
+        # Ensure we correctly access the loss function instance
+        loss_obj = self.model_wrapper.model.loss
+
+        # Retrieve computed values from the loss function
+        P_infty_estimate = float(loss_obj.p_infty_avg.numpy())
+        E_Q_less_qth = float(loss_obj.E_Q_less_qth_avg.numpy())
+
+        # Store values for plotting
+        p_infty_history.append(P_infty_estimate)
+        E_Q_less_qth_history.append(E_Q_less_qth)
+        qth_history.append(float(global_qth.numpy()))
+
+        # Adjust qth based on the given rule
+        if abs(E_Q_less_qth - P_infty_estimate) > self.threshold:
+            if E_Q_less_qth > P_infty_estimate:
+                global_qth.assign(tf.maximum(1e-5, global_qth - self.step_size))  # Decrease qth
+            else:
+                global_qth.assign(tf.minimum(0.5, global_qth + self.step_size))  # Increase qth
+            
+        # Debugging output
+        print(f"\nEpoch {epoch+1}: P_infty = {P_infty_estimate:.6f}, "
+              f"E[Q | Q < qth] = {E_Q_less_qth:.6f}, qth = {global_qth.numpy():.6f}")
 
 class DQNLSTM:
     def __init__(self, model_name=None, epochs=100,data_config= None,learning_rate=0.001,force_retrain: bool= True,lstm_units: int = 32):
@@ -73,8 +110,8 @@ class DQNLSTM:
              
             print(f"Training model: {self.model_name}")
             training_generator = OutageData(**self.data_config)
-            callback = tf.keras.callbacks.EarlyStopping(monitor='loss', patience=self.epochs, restore_best_weights=True)
-            history = model.fit(training_generator, epochs=self.epochs, callbacks=[callback])
+            qth_callback = QthUpdateCallback(self,step_size=0.01, threshold=1e-3)
+            history = model.fit(training_generator, epochs=self.epochs, callbacks=[qth_callback])
             try:
                 model.save(filename)
             except Exception as e:

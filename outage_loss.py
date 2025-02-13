@@ -1,22 +1,8 @@
 import tensorflow as tf
 from data_generator import OutageData
 
-# Define global qth and epoch tracking variables
-global_qth = tf.Variable(0.5, trainable=False, dtype=tf.float32)
-
-# Variables for averaging per epoch
-p_infty_epoch_sum = tf.Variable(0.0, dtype=tf.float32, trainable=False)
-E_Q_less_qth_epoch_sum = tf.Variable(0.0, dtype=tf.float32, trainable=False)
-batch_count = tf.Variable(0, dtype=tf.int32, trainable=False)
-
-p_infty_avg = tf.Variable(0.0, dtype=tf.float32, trainable=False)  # Running average of P_infty
-E_Q_less_qth_avg = tf.Variable(0.0, dtype=tf.float32, trainable=False)  # Running average of E[Q | Q < qth]
-total_epochs = tf.Variable(0, dtype=tf.int32, trainable=False)  # Total number of completed epochs
-
-# Lists to store values per epoch
-p_infty_per_epoch = []
-E_Q_less_qth_per_epoch = []
-qth_per_epoch = []  # Track qth per epoch
+# Define a global qth variable that will be dynamically updated
+global_qth = tf.Variable(0.5, trainable=False, dtype=tf.float32)  # Initial qth = 0.5
 
 def heaviside(x):
     return tf.experimental.numpy.heaviside(x,0)
@@ -52,6 +38,14 @@ def generalise_FP(y_true, y_pred, step_function = heaviside):
     return tf.reduce_sum(tf.multiply(step_function(y_pred - global_qth), 1.0 - y_true))
 
 
+def calculate_P1(y_true, y_pred):
+    TP = generalise_TP(y_true, y_pred)
+    FN = generalise_FN(y_true, y_pred)
+    TN = generalise_TN(y_true, y_pred)
+    FP = generalise_FP(y_true, y_pred)
+    denominator = TN + FN + TP + FP
+    return tf.divide(TP + FN, denominator + 1e-4)  # Avoid division by zero
+
 class MeanSquaredErrorTemperature(tf.keras.losses.Loss):
     def __init__(self, reduction=tf.keras.losses.Reduction.AUTO, name=None):
         super().__init__(reduction, name)
@@ -61,11 +55,23 @@ class MeanSquaredErrorTemperature(tf.keras.losses.Loss):
 
 class InfiniteOutageCoefficientLoss(tf.keras.losses.Loss):
     def __init__(self, data_config, step_size=0.01, threshold=1e-4, reduction=tf.keras.losses.Reduction.AUTO, name=None):
-        #self.qth = qth
         super().__init__(reduction, name)
         self.data_config = data_config
-        self.step_size = step_size  # Step size for updating qth
-        self.threshold = threshold  # Threshold for updating qth
+        self.step_size = step_size
+        self.threshold = threshold
+
+        # Variables to store per-epoch moving averages
+        self.p_infty_avg = tf.Variable(0.0, dtype=tf.float32, trainable=False)
+        self.E_Q_less_qth_avg = tf.Variable(0.0, dtype=tf.float32, trainable=False)
+
+        # Running accumulators for batch-level tracking
+        self.p_infty_epoch_sum = tf.Variable(0.0, dtype=tf.float32, trainable=False)
+        self.E_Q_less_qth_epoch_sum = tf.Variable(0.0, dtype=tf.float32, trainable=False)
+        self.batch_count = tf.Variable(0, dtype=tf.int32, trainable=False)
+
+        # Sliding window buffers
+        self.p_infty_window = []
+        self.E_Q_less_qth_window = []
 
     def squashed_sigmoid(self, input, factor: float = 5.0):
         return tf.divide(1, 1 + tf.math.exp(tf.multiply(-factor, input)))
@@ -86,55 +92,55 @@ class InfiniteOutageCoefficientLoss(tf.keras.losses.Loss):
         return tf.divide(numerator, denominator)
 
     def call(self, y_true, y_pred):
-        global global_qth, p_infty_epoch_sum, E_Q_less_qth_epoch_sum, batch_count
-        global p_infty_avg, E_Q_less_qth_avg, total_epochs
+        global global_qth, p_infty_history, E_Q_less_qth_history, qth_history  
 
-        # Compute P_infty for the current batch
+        #  Compute P_infty per batch
         P_infty_estimate = self.M(y_true, y_pred)
 
-        # Compute E[Q | Q < qth] for the current batch
-        mask = y_pred < global_qth
+        # Compute E[Q | Q < qth] for the batch
+        mask = tf.cast(y_pred < global_qth, tf.float32)
         valid_values = tf.boolean_mask(y_pred, mask)
         E_Q_less_qth = tf.reduce_mean(valid_values) if tf.size(valid_values) > 0 else 0.0  
 
-        # Update accumulators for averaging per epoch
-        p_infty_epoch_sum.assign_add(P_infty_estimate)
-        E_Q_less_qth_epoch_sum.assign_add(E_Q_less_qth)
-        batch_count.assign_add(1)
+        #  Accumulate values for running averages
+        self.p_infty_epoch_sum.assign_add(P_infty_estimate)
+        self.E_Q_less_qth_epoch_sum.assign_add(E_Q_less_qth)
+        self.batch_count.assign_add(1)
 
-        # Check if it's the last batch of the epoch
-        if tf.equal(tf.math.mod(batch_count, self.data_config["epoch_size"]), 0):
-            total_epochs.assign_add(1)  # Correct way to increment tf.Variable
+        #  Compute per-batch running average
+        p_infty_running_avg = self.p_infty_epoch_sum / tf.cast(self.batch_count, tf.float32)
+        E_Q_less_qth_running_avg = self.E_Q_less_qth_epoch_sum / tf.cast(self.batch_count, tf.float32)
 
+        #  At the end of an epoch, compute final per-epoch averages
+        if tf.equal(tf.math.mod(self.batch_count, self.data_config["epoch_size"]), 0):
+            p_infty_epoch_avg = self.p_infty_epoch_sum / tf.cast(self.data_config["epoch_size"], tf.float32)
+            E_Q_less_qth_epoch_avg = self.E_Q_less_qth_epoch_sum / tf.cast(self.data_config["epoch_size"], tf.float32)
 
-            # Compute the per-epoch averages
-            p_infty_epoch_avg = p_infty_epoch_sum / tf.cast(self.data_config["epoch_size"], tf.float32)
-            E_Q_less_qth_epoch_avg = E_Q_less_qth_epoch_sum / tf.cast(self.data_config["epoch_size"], tf.float32)
+            #  Adjust sliding window size dynamically
+            N = tf.cast(tf.math.maximum(1, 10 / (p_infty_epoch_avg * self.data_config["epoch_size"] + 1e-4)), tf.int32)
 
-            # **Update running average over multiple epochs**
-            p_infty_avg.assign((p_infty_avg * tf.cast(total_epochs - 1, tf.float32) + p_infty_epoch_avg) / tf.cast(total_epochs, tf.float32))
+            #  Update sliding window
+            self.p_infty_window.append(float(p_infty_epoch_avg.numpy()))
+            self.p_infty_window = self.p_infty_window[-N.numpy():]
 
-            E_Q_less_qth_avg.assign((E_Q_less_qth_avg * tf.cast(total_epochs - 1, tf.float32) + E_Q_less_qth_epoch_avg) / tf.cast(total_epochs, tf.float32))
+            self.E_Q_less_qth_window.append(float(E_Q_less_qth_epoch_avg.numpy()))
+            self.E_Q_less_qth_window = self.E_Q_less_qth_window[-N.numpy():]
 
+            #  Compute final sliding window averages
+            self.p_infty_avg.assign(sum(self.p_infty_window) / len(self.p_infty_window))
+            self.E_Q_less_qth_avg.assign(sum(self.E_Q_less_qth_window) / len(self.E_Q_less_qth_window))
 
-            # **Update qth based on difference**
-            diff = tf.abs(E_Q_less_qth_avg - p_infty_avg)
-            if diff > self.threshold:
-                if E_Q_less_qth_avg > p_infty_avg:
-                    global_qth.assign(tf.maximum(1e-5, global_qth - self.step_size))  
-                else:
-                    global_qth.assign(tf.minimum(0.5, global_qth + self.step_size))
+            #  Store values for tracking per epoch
+            p_infty_history.append(float(self.p_infty_avg.numpy()))
+            E_Q_less_qth_history.append(float(self.E_Q_less_qth_avg.numpy()))
+            qth_history.append(float(global_qth.numpy()))
 
-            # Store per-epoch values safely using tf.py_function
-            tf.py_function(lambda x: p_infty_per_epoch.append(float(x.numpy())), [p_infty_avg], [])
-            tf.py_function(lambda x: E_Q_less_qth_per_epoch.append(float(x.numpy())), [E_Q_less_qth_avg], [])
-            tf.py_function(lambda x: qth_per_epoch.append(float(x.numpy())), [global_qth], [])
+            # Reset accumulators for next epoch
+            self.p_infty_epoch_sum.assign(0.0)
+            self.E_Q_less_qth_epoch_sum.assign(0.0)
+            self.batch_count.assign(0)
 
-            # Reset accumulators for the next epoch
-            p_infty_epoch_sum.assign(0.0)
-            E_Q_less_qth_epoch_sum.assign(0.0)
-            batch_count.assign(0)
-
+            tf.print("Updating history:", self.p_infty_avg, self.E_Q_less_qth_avg, global_qth)
         return P_infty_estimate
 
 class FiniteOutageCoefficientLoss(InfiniteOutageCoefficientLoss):
@@ -150,9 +156,10 @@ class FiniteOutageCoefficientLoss(InfiniteOutageCoefficientLoss):
         return tf.divide(numerator, denominator)
 
     def call(self, y_true, y_pred):
-        P_infty_estimate = super().call(y_true, y_pred)
-        M = self.M(y_true, y_pred)
-        return M - tf.multiply(tf.pow(self.q(y_true, y_pred), self.S - 1), M - 1)
+        y_true_element = y_true
+        y_pred_element = y_pred
+        M = self.M(y_true_element, y_pred_element)
+        return M - tf.multiply(tf.pow(self.q(y_true_element, y_pred_element), self.S - 1), M - 1)+ tf.square(self.E_Q_less_qth_avg - P1_estimate)
 
 if __name__ == "__main__":
     loss = InfiniteOutageCoefficientLoss()

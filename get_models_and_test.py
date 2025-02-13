@@ -8,10 +8,9 @@ import json
 import tensorflow as tf
 import numpy as np
 from data_generator import OutageData
-from outage_loss import InfiniteOutageCoefficientLoss, TPR, FPR, Precision
-import dqn_lstm
+from outage_loss import InfiniteOutageCoefficientLoss, TPR, FPR, Precision, p_infty_per_epoch, E_Q_less_qth_per_epoch, qth_per_epoch
 import toy_models
-from dqn_lstm import DQNLSTM, qth_history, p_infty_history, E_Q_less_qth_history
+from dqn_lstm import DQNLSTM
 from scipy.optimize import minimize
 from scipy.special import expit, logit
 import matplotlib.pyplot as plt
@@ -71,25 +70,24 @@ temperature_value = 0 #used 10 before
 # Prompt for model type once
 use_model = input("Press 1 to use LSTM, any other key for DQN-LSTM: ")
 
-def plot_qth_p_infty_eq_qth(qth_history, p_infty_history, E_Q_less_qth_history):
-    epochs = range(1, len(qth_history) + 1)
+def plot_p_infty_and_E_Q():
+    """Plots P_infty and E[Q | Q < qth] vs epochs."""
+    if not p_infty_per_epoch or not E_Q_less_qth_per_epoch:
+        print("Error: No data collected for plotting.")
+        return
 
-    plt.figure(figsize=(8, 5))
+    epochs = list(range(1, len(p_infty_per_epoch) + 1))
 
-    # Plot qth
-    plt.plot(epochs, qth_history, marker='o', linestyle='-', color='g', label="qth (Threshold)")
-
-    # Plot E[Q | Q < qth]
-    plt.plot(epochs[:-1], E_Q_less_qth_history, marker='s', linestyle='-', color='b', label="E[Q | Q < qth]")
-
-    # Plot P_infty
-    plt.plot(epochs[:-1], p_infty_history, marker='x', linestyle='--', color='r', label="P_infty")
+    plt.figure(figsize=(8, 5), dpi=100)
+    plt.plot(epochs, p_infty_per_epoch, marker='o', linestyle='-', label="P_infty")
+    plt.plot(epochs, E_Q_less_qth_per_epoch, marker='s', linestyle='-', label="E[Q | Q < qth]")
+    plt.plot(epochs, qth_per_epoch, marker='x', linestyle='--', label="qth (Threshold)")
 
     plt.xlabel("Epochs")
     plt.ylabel("Values")
-    plt.title("qth, P_infty, and E[Q | Q < qth] over Epochs")
+    plt.title("P_infty, E[Q | Q < qth], and qth over Epochs")
     plt.legend()
-    plt.grid()
+    plt.grid(True)
     plt.show()
 
 global_qth = tf.Variable(0.5, trainable=False, dtype=tf.float32)  # Start at qth = 0.5
@@ -154,7 +152,7 @@ for snr in SNRs:
                             else:
                                 model = DQNLSTM(epochs=epochs, data_config=data_config, model_name=model_name, lstm_units=lstm_size)
 
-                            plot_qth_p_infty_eq_qth(qth_history, p_infty_history, E_Q_less_qth_history)   
+                            plot_p_infty_and_E_Q()  
                             training_generator = OutageData(**data_config,)
 
                             P_best_N[model_result] = 0.0

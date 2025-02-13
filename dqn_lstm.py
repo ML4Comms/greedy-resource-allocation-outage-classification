@@ -23,62 +23,7 @@ data_config = {}
 
 # Define a global qth variable that is updated dynamically
 global_qth = tf.Variable(0.5, trainable=False, dtype=tf.float32)  # Start at qth = 0.5
-p_infty_history = []
-E_Q_less_qth_history = []
-qth_history = [global_qth.numpy()]
 
-class QthUpdateCallback(tf.keras.callbacks.Callback):
-    def __init__(self, model_wrapper, data_config, step_size=0.01, threshold=1e-3):
-        super(QthUpdateCallback, self).__init__()
-        self.model_wrapper = model_wrapper  
-        self.data_config = data_config
-        self.step_size = step_size
-        self.threshold = threshold
-        
-
-    def on_epoch_end(self, epoch, logs=None):
-        num_batches = 200  # Use batches to estimate
-        p_infty_accumulator = 0
-        E_Q_less_qth_accumulator = 0
-
-        for _ in range(num_batches):
-            X, y_true = OutageData(**self.data_config).__getitem__(0)
-            y_pred = self.model_wrapper.model.predict(X)
-
-            # Compute P_infty (Expected Outage Probability)
-            P_infty_estimate = self.model_wrapper.model.loss(y_true, y_pred).numpy()
-
-            # Compute E[Q | Q < qth]
-            E_Q_less_qth = self.model_wrapper.compute_E_Q_less_qth()
-
-            # Accumulate values for averaging later
-            p_infty_accumulator += P_infty_estimate
-            E_Q_less_qth_accumulator += E_Q_less_qth
-
-        # Compute final averaged estimates (only one value per epoch)
-        P_infty_estimate = p_infty_accumulator / num_batches
-        E_Q_less_qth = E_Q_less_qth_accumulator / num_batches
-
-        # Compute absolute difference
-        diff = abs(E_Q_less_qth - P_infty_estimate)
-
-        # Adjust `qth` dynamically based on relationship with P_infty
-        if diff > self.threshold:
-            if E_Q_less_qth > P_infty_estimate:
-                global_qth.assign(max(1e-5, global_qth - self.step_size))  
-            else:
-                global_qth.assign(min(0.5, global_qth + self.step_size))
-
-        # Store history **only once per epoch**
-        p_infty_history.append(P_infty_estimate)
-        E_Q_less_qth_history.append(E_Q_less_qth)
-        qth_history.append(global_qth.numpy())
-
-        # Print log
-        print(f"Epoch {epoch+1}: Updated qth = {global_qth.numpy():.5f}, P_infty = {P_infty_estimate:.6f}, "
-              f"E[Q | Q < qth] = {E_Q_less_qth:.6f}, |E[Q | Q < qth] - P_infty| = {diff:.6f}")
-        
-        
 class DQNLSTM:
     def __init__(self, model_name=None, epochs=100,data_config= None,learning_rate=0.001,force_retrain: bool= True,lstm_units: int = 32):
         self.input_shape = (data_config["batch_size"], data_config["input_size"], 1)
@@ -103,8 +48,13 @@ class DQNLSTM:
         model.add(LSTM(self.lstm_units, input_shape=(self.input_shape[1], self.input_shape[2]),return_sequences= False))
         model.add(Dense(10, activation='PReLU'))
         model.add(Dense(1,activation='sigmoid'))  # Use the first element of output_shape as the number of units
-        path = f"models/{self.model_name}"
-        if self.force_retrain or not os.path.exists(path):
+        directory = f"models/{self.model_name}"
+        filename = f"{directory}/model.keras"
+
+        # Create the directory if it doesn't exist
+        os.makedirs(directory, exist_ok=True)
+        
+        if self.force_retrain or not os.path.exists(filename):
             if 'mse' in self.model_name:
                 model.compile(loss=MeanSquaredError(), optimizer='adam',metrics=[tf.keras.metrics.MeanSquaredError()])
             elif 'binary_cross_entropy' in self.model_name:
@@ -114,24 +64,30 @@ class DQNLSTM:
             elif 'mae' in self.model_name:
                 model.compile(loss=MeanAbsoluteError(), optimizer='adam', metrics=[tf.keras.metrics.MeanAbsoluteError()])
             elif "fin_coef_loss" in self.model_name:
-                model.compile(loss=FiniteOutageCoefficientLoss(S=self.data_config["batch_size"]), optimizer='adam',metrics=[tf.keras.metrics.Recall(), 
+                model.compile(loss=FiniteOutageCoefficientLoss(data_config=self.data_config, S=self.data_config["batch_size"]), optimizer='adam',metrics=[tf.keras.metrics.Recall(), 
                                     tf.keras.metrics.Precision(),
                                     tf.keras.metrics.BinaryAccuracy(),
                                     tf.keras.metrics.Accuracy()])
             else:
                 raise ValueError(f"Invalid loss name: {self.model_name}")
+             
             print(f"Training model: {self.model_name}")
-            self.model = model
             training_generator = OutageData(**self.data_config)
-            callback = QthUpdateCallback(self,self.data_config)
+            callback = tf.keras.callbacks.EarlyStopping(monitor='loss', patience=self.epochs, restore_best_weights=True)
             history = model.fit(training_generator, epochs=self.epochs, callbacks=[callback])
+            try:
+                model.save(filename)
+            except Exception as e:
+                print(f"Error saving model: {e}")
             return model
         else:
             print(f"Loading model: {self.model_name}")
-            model = tf.keras.models.load_model(path, compile = False)
-            self.model = model
+            try:
+                model = tf.keras.models.load_model(filename, compile=False)
+            except Exception as e:
+                print(f"Error loading model: {e}")
+                raise
             return model
-    
     def remember(self, state, action, reward, next_state, done):
         self.memory.append((state, action, reward, next_state, done))
 
@@ -157,27 +113,6 @@ class DQNLSTM:
         # Directly call the predict method of the encapsulated Keras model
         return self.model.predict(*args, **kwargs)
     
-    def compute_E_Q_less_qth(self):
-        num_batches = 200 
-        total_sum = 0.0 
-        count = 0 
-
-        for _ in range(num_batches):
-            X, _ = OutageData(**self.data_config).__getitem__(0)
-            y_pred = self.model.predict(X)
-
-            # Masking to find values below qth
-            mask = y_pred < global_qth.numpy()
-            valid_values = tf.boolean_mask(y_pred, mask)
-
-            if tf.size(valid_values) > 0:  # Check if there are valid values
-                total_sum += tf.reduce_sum(valid_values).numpy()
-                count += tf.size(valid_values).numpy()
-
-        if count > 0:
-            return total_sum / count
-        else:
-            return 0.0  
 
     def train(self, X, y_label, num_episodes=1000, batch_size=32):
         rewards = []

@@ -16,10 +16,6 @@ from outage_loss import FiniteOutageCoefficientLoss
 # TODO Make setting this less weird!
 data_config = {}
 
-<<<<<<< Updated upstream
-
-=======
->>>>>>> Stashed changes
 class DQNLSTM:
     def __init__(self, qth:float,model_name=None, epochs=100,data_config= None,learning_rate=0.001,force_retrain: bool= True,lstm_units: int = 32):
         self.input_shape = (data_config["batch_size"], data_config["input_size"], 1)

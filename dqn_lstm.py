@@ -16,7 +16,10 @@ from outage_loss import FiniteOutageCoefficientLoss
 # TODO Make setting this less weird!
 data_config = {}
 
+<<<<<<< Updated upstream
 
+=======
+>>>>>>> Stashed changes
 class DQNLSTM:
     def __init__(self, qth:float,model_name=None, epochs=100,data_config= None,learning_rate=0.001,force_retrain: bool= True,lstm_units: int = 32):
         self.input_shape = (data_config["batch_size"], data_config["input_size"], 1)
@@ -42,8 +45,13 @@ class DQNLSTM:
         model.add(LSTM(self.lstm_units, input_shape=(self.input_shape[1], self.input_shape[2]),return_sequences= False))
         model.add(Dense(10, activation='PReLU'))
         model.add(Dense(1,activation='sigmoid'))  # Use the first element of output_shape as the number of units
-        path = f"models/{self.model_name}"
-        if self.force_retrain or not os.path.exists(path):
+        directory = f"models/{self.model_name}"
+        filename = f"{directory}/model.keras"
+
+        # Create the directory if it doesn't exist
+        os.makedirs(directory, exist_ok=True)
+        
+        if self.force_retrain or not os.path.exists(filename):
             if 'mse' in self.model_name:
                 model.compile(loss=MeanSquaredError(), optimizer='adam',metrics=[tf.keras.metrics.MeanSquaredError()])
             elif 'binary_cross_entropy' in self.model_name:
@@ -66,8 +74,10 @@ class DQNLSTM:
             return model
         else:
             print(f"Loading model: {self.model_name}")
-            model = tf.keras.models.load_model(path, compile = False)
+            model = tf.keras.models.load_model(filename, compile = False)
+            model.save(filename)
             return model
+        
     
     def remember(self, state, action, reward, next_state, done):
         self.memory.append((state, action, reward, next_state, done))

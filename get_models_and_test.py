@@ -8,10 +8,12 @@ import json
 import tensorflow as tf
 import numpy as np
 from data_generator import OutageData
-from outage_loss import InfiniteOutageCoefficientLoss, TPR, FPR, Precision
-import dqn_lstm
+from outage_loss import InfiniteOutageCoefficientLoss, TPR, FPR, Precision, p_infty_per_epoch, E_Q_less_qth_per_epoch, qth_per_epoch
 import toy_models
 from dqn_lstm import DQNLSTM
+from scipy.optimize import minimize
+from scipy.special import expit, logit
+import matplotlib.pyplot as plt
 
 def bubble_sort_indices(arr):
     n = len(arr)
@@ -55,8 +57,8 @@ number_of_training_routines_per_model = 1
 number_to_discard = 0
 out = 10
 number_of_tests = 6
-SNRs = [10.0]#FOR SNR =1 its 2000; for 8 its 6000
-qth_range = [0.1]
+SNRs = [1.58]
+#qth_range = [0.1]
 phase_shift = 0.1
 epochs = 3
 epoch_size = 10
@@ -68,15 +70,51 @@ temperature_value = 0 #used 10 before
 # Prompt for model type once
 use_model = input("Press 1 to use LSTM, any other key for DQN-LSTM: ")
 
+def plot_p_infty_and_E_Q():
+    """Plots P_infty and E[Q | Q < qth] vs epochs."""
+    if not p_infty_per_epoch or not E_Q_less_qth_per_epoch:
+        print("Error: No data collected for plotting.")
+        return
+
+    epochs = list(range(1, len(p_infty_per_epoch) + 1))
+
+    plt.figure(figsize=(8, 5), dpi=100)
+    plt.plot(epochs, p_infty_per_epoch, marker='o', linestyle='-', label="P_infty")
+    plt.plot(epochs, E_Q_less_qth_per_epoch, marker='s', linestyle='-', label="E[Q | Q < qth]")
+    plt.plot(epochs, qth_per_epoch, marker='x', linestyle='--', label="qth (Threshold)")
+
+    plt.xlabel("Epochs")
+    plt.ylabel("Values")
+    plt.title("P_infty, E[Q | Q < qth], and qth over Epochs")
+    plt.legend()
+    plt.grid(True)
+    plt.show()
+
+global_qth = tf.Variable(0.5, trainable=False, dtype=tf.float32)  # Start at qth = 0.5
+
+nll_function = DQNLSTM.calculate_binary_nll
+
+scaling_method = input("Enter the scaling method ('temp','platt','beta', 'isotonic','none'): ").strip().lower()
+
+set_params = False
+if scaling_method != 'none':
+    set_params = input(f"Do you want to set hard values for {scaling_method} scaling? (yes/no): ").strip().lower() == 'yes'
+
+if scaling_method == 'platt' and set_params:
+    platt_A = float(input("Enter Platt scaling coefficient A: "))
+    platt_B = float(input("Enter Platt scaling coefficient B: "))
+
+elif scaling_method == 'temp' and set_params:
+    temp_T = float(input("Enter Temperature scaling parameter T: "))
 
 for snr in SNRs:
-    for qth in qth_range:
+    #for qth in qth_range:
         for lstm_size in [32]:
             for resource in resources:
                 for model_prefix in model_prefix_names:
                     for rate_threshold in rates:
-                        model_result = f"{model_prefix}_snr-{snr}_rt-{rate_threshold}_r-{resource}_qth--{qth}_lstm-{lstm_size}_out-{out}_phase-{phase_shift}"
-                        model_name = f"{model_prefix}_snr-{snr}_rt-{rate_threshold}_r-{resource}_qth--{qth}_lstm-{lstm_size}_out-{out}_phase-{phase_shift}"
+                        model_result = f"{model_prefix}_snr-{snr}_rt-{rate_threshold}_r-{resource}_lstm-{lstm_size}_out-{out}_phase-{phase_shift}"
+                        model_name = f"{model_prefix}_snr-{snr}_rt-{rate_threshold}_r-{resource}_lstm-{lstm_size}_out-{out}_phase-{phase_shift}"
 
                         P_R_critical_average_outage_counters[model_result] = []
                         P_R_average_outage_counters[model_result] = []
@@ -110,11 +148,11 @@ for snr in SNRs:
                                                                     epochs=epochs, 
                                                                     force_retrain=force_retrain_models, 
                                                                     lstm_units=lstm_size,
-                                                                    qth=qth_range)
+                                                                   )
                             else:
-                                model = DQNLSTM(qth, epochs=epochs, data_config=data_config, model_name=model_name, lstm_units=lstm_size)
+                                model = DQNLSTM(epochs=epochs, data_config=data_config, model_name=model_name, lstm_units=lstm_size)
 
-                                
+                            plot_p_infty_and_E_Q()  
                             training_generator = OutageData(**data_config,)
 
                             P_best_N[model_result] = 0.0
@@ -133,13 +171,42 @@ for snr in SNRs:
                             P_inf_counter = 0
                             cdf_counter = 0
                             
-                            
-                            dqn_lstm = DQNLSTM(qth,epochs=epochs,data_config=data_config,model_name=model_name,lstm_units=lstm_size)
-
+                            if scaling_method != 'none':
+                                if scaling_method == 'platt':
+                                    if set_params:
+                                        model.A, model.B = platt_A, platt_B
+                                    else:
+                                        model.calibrate(data_config, method=scaling_method)
+                                        platt_A, platt_B = model.A, model.B
+                                elif scaling_method == 'temp':
+                                    if set_params:
+                                        model.temp = temp_T
+                                    else:
+                                        model.calibrate(data_config, method=scaling_method)
+                                        temp_T = model.temp
+                                elif scaling_method == 'beta':
+                                    model.calibrate(data_config, method='beta')
+                                elif scaling_method == 'isotonic':
+                                    model.calibrate(data_config, method='isotonic')
+                                else:
+                                    model.calibrate(data_config, method=scaling_method)
 
                             for _ in range(number_of_tests):
                                 X, y_label = training_generator.__getitem__(0)
+                                # Get the initial predictions
                                 Y_pred = model.predict(X)
+
+                                # Apply calibration
+                                if scaling_method == 'none':
+                                    pass  # No changes to Y_pred
+                                elif scaling_method == 'platt':
+                                    Y_pred = expit(model.A * logit(Y_pred) + model.B)
+                                elif scaling_method == 'temp':
+                                    Y_pred = expit(logit(Y_pred) / model.temp)
+                                elif scaling_method == 'beta':
+                                    Y_pred = model.beta_calibrator.predict(Y_pred).reshape(-1, 1).astype(np.float32) 
+                                elif scaling_method == 'isotonic':
+                                    Y_pred = model.isotonic_predict(Y_pred).reshape(-1, 1)
 
                                 resource_used = 0
                                 
@@ -148,9 +215,9 @@ for snr in SNRs:
                                 best_of_N_in_outage = False
                                 idx_of_best = 0
                                 # Loop over the pre-calibrated outputs
-                                tpr[model_result] += TPR(qth=qth, y_pred=Y_pred, y_true=y_label).numpy()
-                                fpr[model_result] += FPR(qth=qth, y_pred=Y_pred, y_true=y_label).numpy()
-                                precision[model_result] += Precision(qth=qth, y_pred=Y_pred, y_true=y_label).numpy()
+                                tpr[model_result] += TPR(y_pred=Y_pred, y_true=y_label).numpy()
+                                fpr[model_result] += FPR(y_pred=Y_pred, y_true=y_label).numpy()
+                                precision[model_result] += Precision( y_pred=Y_pred, y_true=y_label).numpy()
                                 for idx, y_pred in enumerate(Y_pred):
                                 
                                     # P1 calculation
@@ -159,7 +226,7 @@ for snr in SNRs:
                                         
                                     # P_inf and CDF calculation
                                     cdf_counter += 1
-                                    if y_pred[0] <= qth:
+                                    if y_pred[0] <= global_qth:
                                         cdf[model_result] += 1.0
                                         
                                         P_inf_counter += 1
@@ -179,12 +246,12 @@ for snr in SNRs:
                                         if idx == resource-1:
                                             resource_used = idx_of_best
                                             P_R_critical[model_result] += float(best_of_N_in_outage)
-                                        elif y_pred[0] <= qth:
+                                        elif y_pred[0] <= global_qth:
                                             resource_used = idx
                                             should_count = False
                                             if y_label[idx][0] >= 0.5:
                                                 P_R_critical[model_result] += 1.0
-                                        if(idx == resource-1 or y_pred[0] <= qth):
+                                        if(idx == resource-1 or y_pred[0] <= global_qth):
                                             resource_used = idx
                                             should_count = False
                                             if y_label[idx][0] >= 0.5:
@@ -230,7 +297,7 @@ for snr in SNRs:
                             with open(f'simulation_results_{resource}_{model_prefix}_nbest.txt', 'a') as convert_file:
                                 convert_file.write("\nData configuration:\n")
                                 convert_file.write(json.dumps(data_config, indent=4))
-                                convert_file.write(f"\nEpochs: {epochs}, qth: {qth}, Number of tests: {number_of_tests}\n")
+                                convert_file.write(f"\nEpochs: {epochs}, Number of tests: {number_of_tests}\n")
                                 convert_file.write("\n\nP_R:\n")
                                 convert_file.write(json.dumps(P_R, indent=4))
                                 convert_file.write("\n\nPRECISION:\n")
@@ -250,7 +317,7 @@ for snr in SNRs:
                             with open(f'analytic_results_{resource}_{model_prefix}_nbest.txt', 'a') as convert_file:
                                 convert_file.write("\nData configuration:\n")
                                 convert_file.write(json.dumps(data_config, indent=4))
-                                convert_file.write(f"\nEpochs: {epochs}, qth: {qth}, Number of tests: {number_of_tests}\n")
+                                convert_file.write(f"\nEpochs: {epochs}, Number of tests: {number_of_tests}\n")
                                 convert_file.write("\nP_1:\n")
                                 convert_file.write(json.dumps(P_1, indent=4))
                                 convert_file.write("\nP_inf:\n")

@@ -1,5 +1,6 @@
 import tensorflow as tf
 from data_generator import OutageData
+import sklearn
 
 def heaviside(x):
     return tf.experimental.numpy.heaviside(x,0)
@@ -44,7 +45,7 @@ class MeanSquaredErrorTemperature(tf.keras.losses.Loss):
 
 class InfiniteOutageCoefficientLoss(tf.keras.losses.Loss):
     def __init__(self, reduction=tf.keras.losses.Reduction.AUTO, name=None, qth = 0.5):
-        self.qth = qth
+        self.qth = tf.Variable(qth)
         super().__init__(reduction, name)
 
     def squashed_sigmoid(self, input, factor: float = 5.0):
@@ -69,22 +70,99 @@ class InfiniteOutageCoefficientLoss(tf.keras.losses.Loss):
         return self.M(y_true, y_pred)
 
 class FiniteOutageCoefficientLoss(InfiniteOutageCoefficientLoss):
-    def __init__(self, S: int, reduction=tf.keras.losses.Reduction.AUTO, name=None, qth = 0.5):
-        self.qth = qth
+    def __init__(self, S: int, reduction=tf.keras.losses.Reduction.AUTO, name=None, qth=0.5):
+
         self.S = S
-        super().__init__(reduction=tf.keras.losses.Reduction.AUTO, name=None, qth = 0.5)
+
+        # Running averages
+        self.conditional_avg_y_pred = tf.Variable(0.0, trainable=False, dtype=tf.float32)  
+        self.conditional_avg_M = tf.Variable(0.0, trainable=False, dtype=tf.float32)  
+        self.count_y_pred = tf.Variable(0, trainable=False, dtype=tf.float32)  
+        self.count_M = tf.Variable(0, trainable=False, dtype=tf.float32)
+
+        super().__init__(reduction=reduction, name=name, qth=qth)
 
     def q(self, y_true, y_pred):
-        epsilon = 0.0001
+        epsilon = 1e-4
         numerator = self.TP(y_true, y_pred) + self.FP(y_true, y_pred)
-        denominator =  epsilon + self.TP(y_true, y_pred) + self.FP(y_true, y_pred) + self.TN(y_true, y_pred) + self.FN(y_true, y_pred)
+        denominator = epsilon + self.TP(y_true, y_pred) + self.FP(y_true, y_pred) + self.TN(y_true, y_pred) + self.FN(y_true, y_pred)
         return tf.divide(numerator, denominator)
 
+
+    def conditional_average(self, y_pred, threshold):
+        mask_y_pred = tf.cast(y_pred <= threshold, tf.float32)  
+        valid_y_pred = y_pred * mask_y_pred  
+        count_valid_y_pred = tf.reduce_sum(mask_y_pred)  
+        sum_valid_y_pred = tf.reduce_sum(valid_y_pred)
+        return tf.math.divide_no_nan(
+            sum_valid_y_pred,
+            tf.cast(count_valid_y_pred, tf.float32)
+        )
+
+    def P1(self, y_true, y_pred):
+        epsilon = 0.0000001
+        numerator = self.TP(y_true, y_pred) + self.FN(y_true, y_pred)
+        denominator =  epsilon + self.TN(y_true, y_pred) + self.FN(y_true, y_pred) + self.TP(y_true, y_pred) + self.FP(y_true, y_pred)
+        return tf.divide(numerator, denominator)
+
+    def update_conditional_avg(self, y_pred, M):
+        """ Updates running averages for y_pred (conditional) and M """
+
+        # Update for y_pred where y_pred <= qth
+        mask_y_pred = tf.cast(y_pred <= self.qth, tf.float32)  
+        valid_y_pred = y_pred * mask_y_pred  
+        count_valid_y_pred = tf.reduce_sum(mask_y_pred)  
+        sum_valid_y_pred = tf.reduce_sum(valid_y_pred)
+
+        new_count_y_pred = tf.cast(self.count_y_pred, tf.float32) + count_valid_y_pred
+        new_avg_y_pred = tf.math.divide_no_nan(
+            self.conditional_avg_y_pred * tf.cast(self.count_y_pred, tf.float32) + sum_valid_y_pred,
+            tf.cast(new_count_y_pred, tf.float32)
+        )
+
+        # Assign updates for y_pred tracking
+        self.conditional_avg_y_pred.assign(new_avg_y_pred)
+        self.count_y_pred.assign(new_count_y_pred)
+
+        # Update for M
+        count_valid_M = tf.size(M, out_type=tf.float32)  
+        sum_valid_M = tf.reduce_sum(M)
+
+        new_count_M = self.count_M + count_valid_M
+        new_avg_M = tf.math.divide_no_nan(
+            self.conditional_avg_M * tf.cast(self.count_M, tf.float32) + sum_valid_M,
+            tf.cast(new_count_M, tf.float32)
+        )
+
+        # Assign updates for M tracking
+        self.conditional_avg_M.assign(new_avg_M)
+        self.count_M.assign(new_count_M)
+
+    def adjust_qth(self):
+        """ Dynamically updates qth based on the relationship between conditional_avg_y_pred and conditional_avg_M """
+
+        # Shift qth down if conditional_avg_y_pred > conditional_avg_M, otherwise shift up
+        shift = tf.cond(
+            self.conditional_avg_y_pred > self.conditional_avg_M,
+            lambda: -0.03,  # Decrease qth
+            lambda: 0.03    # Increase qth
+        )
+        self.qth.assign_add(shift)
+        self.conditional_avg_y_pred.assign(0)
+        self.conditional_avg_M.assign(0)
+        self.count_M.assign(0)
+        self.count_y_pred.assign(0)
+
     def call(self, y_true, y_pred):
+        """ Computes the loss, updates the conditional averages, and adjusts qth dynamically """
+
         y_true_element = y_true
         y_pred_element = y_pred
         M = self.M(y_true_element, y_pred_element)
-        return M - tf.multiply(tf.pow(self.q(y_true_element, y_pred_element), self.S - 1), M - 1)
+
+        # Update running averages
+        self.update_conditional_avg(y_pred_element, M)
+        return M - tf.multiply(tf.pow(self.q(y_true_element, y_pred_element), self.S - 1), M - 1) + tf.square(self.conditional_average(y_pred, self.qth) - self.M(y_true, y_pred))
 
 if __name__ == "__main__":
     loss = InfiniteOutageCoefficientLoss()

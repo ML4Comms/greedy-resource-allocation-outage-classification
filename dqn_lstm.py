@@ -30,7 +30,6 @@ class DQNLSTM(tf.keras.Model):
         self.model_name = model_name
         self.epochs = epochs
         self.data_config = data_config
-        self.qth = qth
         #self.batch_size = batch_size
         self.learning_rate = learning_rate
         self.force_retrain = force_retrain

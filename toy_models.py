@@ -61,7 +61,7 @@ class ModelType(Enum):
     TemperatureModel = 1
     DQNLSTM = 2
 
-def get_model(data_input, 
+def get_model_and_loss(data_input, 
                 model_name, 
                 qth: float,
                 lstm_units: int = 32,
@@ -76,29 +76,34 @@ def get_model(data_input,
 
     print(f"Training model: {model_name}")
     if "mse" in model_name:
-        model.compile(loss=tf.keras.losses.MeanSquaredError(),
+        loss = tf.keras.losses.MeanSquaredError()
+        model.compile(loss=loss,
                         optimizer=tf.keras.optimizers.Adam(),
                         metrics=[tf.keras.metrics.MeanAbsoluteError()])
     elif "binary_cross_entropy" in model_name:
-        model.compile(loss=tf.keras.losses.BinaryCrossentropy(from_logits=False),
+        loss = tf.keras.losses.BinaryCrossentropy(from_logits=False)
+        model.compile(loss=loss,
                         optimizer=tf.keras.optimizers.Adam(),
                             metrics=[tf.keras.metrics.Recall(), 
                                     tf.keras.metrics.Precision(),
                                     tf.keras.metrics.BinaryAccuracy(),
                                     tf.keras.metrics.Accuracy()])
     elif "mae" in model_name:
-        model.compile(loss=tf.keras.losses.MeanAbsoluteError(),
+        loss = tf.keras.losses.MeanAbsoluteError()
+        model.compile(loss=loss,
                         optimizer=tf.keras.optimizers.Adam(),
                         metrics=[tf.keras.metrics.MeanAbsoluteError()])
     elif "inf_coef_loss" in model_name:
-        model.compile(loss=InfiniteOutageCoefficientLoss(qth= qth),
+        loss = InfiniteOutageCoefficientLoss(qth= qth)
+        model.compile(loss=loss,
                         optimizer=tf.keras.optimizers.Adam(),
                             metrics=[tf.keras.metrics.Recall(), 
                                     tf.keras.metrics.Precision(),
                                     tf.keras.metrics.BinaryAccuracy(),
                                     tf.keras.metrics.Accuracy()])
     elif "fin_coef_loss" in model_name:
-        model.compile(loss=FiniteOutageCoefficientLoss(S = data_input["batch_size"], qth = qth),
+        loss = FiniteOutageCoefficientLoss(S = data_input["batch_size"], qth = qth)
+        model.compile(loss=loss,
                         optimizer=tf.keras.optimizers.Adam(),
                             metrics=[tf.keras.metrics.Recall(), 
                                     tf.keras.metrics.Precision(),
@@ -106,7 +111,7 @@ def get_model(data_input,
                                     tf.keras.metrics.Accuracy()])
     elif "dummy" in model_name:
         return DummyModel()
-    return model
+    return model, loss
         
 
 def get_fitted_model(data_input, 
@@ -121,15 +126,36 @@ def get_fitted_model(data_input,
     path = f"models/{model_name}"
     if force_retrain or not os.path.exists(path):
         
-        model = get_model(data_input, 
-                    model_name, 
-                    qth,
-                    lstm_units,
-                    model_type=model_type)
+        model, loss = get_model_and_loss(data_input, 
+                                         model_name, 
+                                         qth,
+                                         lstm_units,
+                                         model_type=model_type)
 
-        callback = tf.keras.callbacks.EarlyStopping(monitor='loss', patience=epochs, restore_best_weights=True)
-        history = model.fit(training_generator, epochs=epochs,
-                            callbacks=[callback])
+        class PrintQthCallback(tf.keras.callbacks.Callback):
+            def __init__(self, loss):
+                super().__init__()
+                self.loss = loss  # Store reference to the loss function
+
+            def on_epoch_end(self, epoch, logs=None):
+                print("\n\non_epoch_end\n\n")
+                if hasattr(self.loss, 'conditional_avg_y_pred'):
+                    print(f"\n\nEqth = {self.loss.conditional_avg_y_pred.numpy()}\n\n")
+                if hasattr(self.loss, 'qth'):
+                    print(f"\n\nPinf = {self.loss.conditional_avg_M.numpy()}\n\n")
+                self.loss.adjust_qth()
+                if hasattr(self.loss, 'qth'):
+                    print(f"\n\nEpoch {epoch+1}: qth = {self.loss.qth.numpy()}\n\n")
+                else:
+                    print("\n\nno qth\n\n")
+
+        callbacks = [
+            tf.keras.callbacks.EarlyStopping(monitor='loss', patience=epochs, restore_best_weights=True),
+            PrintQthCallback(loss)
+        ]
+
+        history = model.fit(training_generator, epochs=epochs, callbacks=callbacks)
+        
         model.save(path)
         return model
 

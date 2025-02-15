@@ -7,7 +7,7 @@ import numpy as np
 import tensorflow as tf
 from data_generator import OutageData
 
-from toy_models import get_model
+from toy_models import get_model_and_loss
 # load pima indians dataset
 
 model_name = "fin_coef_loss"
@@ -55,7 +55,7 @@ with open(filename, 'a') as convert_file:
     convert_file.write(f"======================================\n")
 
 for model_prefix in model_prefix_names:
-    model = get_model(data_input=data_config, 
+    model = get_model_and_loss(data_input=data_config, 
                     model_name=model_name,
                     qth=0.5)
     history = model.fit(training_generator, 

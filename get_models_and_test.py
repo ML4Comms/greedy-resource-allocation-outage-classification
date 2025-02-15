@@ -56,10 +56,10 @@ number_to_discard = 0
 out = 10
 number_of_tests = 6
 SNRs = [10.0]#FOR SNR =1 its 2000; for 8 its 6000
-qth_range = [0.1]
+qth_range = [0.05]
 phase_shift = 0.1
-epochs = 3
-epoch_size = 10
+epochs = 100
+epoch_size = 100
 resources = [4]
 rates = [0.5]
 model_prefix_names = ["fin_coef_loss"]
@@ -115,7 +115,7 @@ for snr in SNRs:
                                                                 epochs=epochs, 
                                                                 force_retrain=force_retrain_models, 
                                                                 lstm_units=lstm_size,
-                                                                qth=qth_range,
+                                                                qth=qth,
                                                                 model_type=model_type)
                                 
                             training_generator = OutageData(**data_config,)

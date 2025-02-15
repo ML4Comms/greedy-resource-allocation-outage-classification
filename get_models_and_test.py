@@ -8,7 +8,7 @@ import json
 import tensorflow as tf
 import numpy as np
 from data_generator import OutageData
-from outage_loss import InfiniteOutageCoefficientLoss, TPR, FPR, Precision, p_infty_per_epoch, E_Q_less_qth_per_epoch, qth_per_epoch
+from outage_loss import InfiniteOutageCoefficientLoss, TPR, FPR, Precision
 import toy_models
 from dqn_lstm import DQNLSTM
 from scipy.optimize import minimize

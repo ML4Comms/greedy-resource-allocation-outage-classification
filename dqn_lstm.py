@@ -29,36 +29,37 @@ E_Q_less_qth_history = []
 qth_history = []
 
 class QthUpdateCallback(tf.keras.callbacks.Callback):
-    def __init__(self, model_wrapper, step_size=0.01, threshold=1e-3):
+    def __init__(self, loss_obj, step_size=0.01, threshold=1e-3):
         super().__init__()
-        self.model_wrapper = model_wrapper  
+        self.loss_obj = loss_obj  
         self.step_size = step_size
         self.threshold = threshold
 
     def on_epoch_end(self, epoch, logs=None):
         global global_qth, p_infty_history, E_Q_less_qth_history, qth_history
 
-        # Ensure we correctly access the loss function instance
-        loss_obj = self.model_wrapper.model.loss
+        print(f"Loss object at epoch {epoch+1}: {self.loss_obj}")
+        print("Loss object attributes: ", dir(self.loss_obj))  
 
-        # Retrieve computed values from the loss function
-        P_infty_estimate = float(loss_obj.p_infty_avg.numpy())
-        E_Q_less_qth = float(loss_obj.E_Q_less_qth_avg.numpy())
+        try:
+            P_infty_estimate = float(self.loss_obj.p_infty_avg.numpy()) 
+            E_Q_less_qth = float(self.loss_obj.E_Q_less_qth_avg.numpy())  
+        except AttributeError as e:
+            print(f"Error accessing attributes in QthUpdateCallback: {e}")
+            return
 
-        # Store values for plotting
+        # Store values for tracking
         p_infty_history.append(P_infty_estimate)
         E_Q_less_qth_history.append(E_Q_less_qth)
         qth_history.append(float(global_qth.numpy()))
 
-        # Adjust qth based on the given rule
         if abs(E_Q_less_qth - P_infty_estimate) > self.threshold:
             if E_Q_less_qth > P_infty_estimate:
-                global_qth.assign(tf.maximum(1e-5, global_qth - self.step_size))  # Decrease qth
+                global_qth.assign(tf.maximum(1e-5, global_qth - self.step_size))
             else:
-                global_qth.assign(tf.minimum(0.5, global_qth + self.step_size))  # Increase qth
-            
-        # Debugging output
-        print(f"\nEpoch {epoch+1}: P_infty = {P_infty_estimate:.6f}, "
+                global_qth.assign(tf.minimum(0.5, global_qth + self.step_size))
+
+        print(f"Epoch {epoch+1}: P_infty = {P_infty_estimate:.6f}, "
               f"E[Q | Q < qth] = {E_Q_less_qth:.6f}, qth = {global_qth.numpy():.6f}")
 
 class DQNLSTM:
@@ -107,24 +108,19 @@ class DQNLSTM:
                                     tf.keras.metrics.Accuracy()])
             else:
                 raise ValueError(f"Invalid loss name: {self.model_name}")
-             
             print(f"Training model: {self.model_name}")
+            self.model = model
             training_generator = OutageData(**self.data_config)
             qth_callback = QthUpdateCallback(self,step_size=0.01, threshold=1e-3)
             history = model.fit(training_generator, epochs=self.epochs, callbacks=[qth_callback])
-            try:
-                model.save(filename)
-            except Exception as e:
-                print(f"Error saving model: {e}")
+            model.save(filename)
             return model
         else:
             print(f"Loading model: {self.model_name}")
-            try:
-                model = tf.keras.models.load_model(filename, compile=False)
-            except Exception as e:
-                print(f"Error loading model: {e}")
-                raise
+            model = tf.keras.models.load_model(filename, compile = False)
+            self.model = model
             return model
+
     def remember(self, state, action, reward, next_state, done):
         self.memory.append((state, action, reward, next_state, done))
 

@@ -1,8 +1,13 @@
 import tensorflow as tf
 from data_generator import OutageData
 
+
 # Define a global qth variable that will be dynamically updated
 global_qth = tf.Variable(0.5, trainable=False, dtype=tf.float32)  # Initial qth = 0.5
+p_infty_history = []
+E_Q_less_qth_history = []
+qth_history = []
+
 
 def heaviside(x):
     return tf.experimental.numpy.heaviside(x,0)
@@ -29,14 +34,24 @@ def Precision(y_true, y_pred, step_function = heaviside):
         return result
 
 def generalise_TN(y_true, y_pred, step_function = heaviside):
-    return tf.reduce_sum(tf.multiply(step_function(global_qth - y_pred), 1.0 - y_true))
+     return tf.reduce_sum(tf.multiply(step_function(global_qth - y_pred), 1.0 - y_true))
+
 def generalise_FN(y_true, y_pred, step_function = heaviside):
     return tf.reduce_sum(tf.multiply(step_function(global_qth - y_pred), y_true))
+
 def generalise_TP(y_true, y_pred, step_function = heaviside):
     return tf.reduce_sum(tf.multiply(step_function(y_pred - global_qth), y_true))
+
 def generalise_FP(y_true, y_pred, step_function = heaviside):
     return tf.reduce_sum(tf.multiply(step_function(y_pred - global_qth), 1.0 - y_true))
 
+def calculate_P1(y_true, y_pred):
+    TP = generalise_TP(y_true, y_pred)
+    FN = generalise_FN(y_true, y_pred)
+    TN = generalise_TN(y_true, y_pred)
+    FP = generalise_FP(y_true, y_pred)
+    denominator = TN + FN + TP + FP
+    return tf.divide(TP + FN, denominator + 1e-4)  # Avoid division by zero
 
 def calculate_P1(y_true, y_pred):
     TP = generalise_TP(y_true, y_pred)
@@ -72,10 +87,9 @@ class InfiniteOutageCoefficientLoss(tf.keras.losses.Loss):
         # Sliding window buffers
         self.p_infty_window = []
         self.E_Q_less_qth_window = []
-
+        
     def squashed_sigmoid(self, input, factor: float = 5.0):
         return tf.divide(1, 1 + tf.math.exp(tf.multiply(-factor, input)))
-
     def TN(self, y_true, y_pred):
         return generalise_TN(y_true=y_true, y_pred=y_pred, step_function=self.squashed_sigmoid)
     def FN(self, y_true, y_pred):
@@ -84,7 +98,6 @@ class InfiniteOutageCoefficientLoss(tf.keras.losses.Loss):
         return generalise_TP(y_true=y_true, y_pred=y_pred, step_function=self.squashed_sigmoid)
     def FP(self, y_true, y_pred):
         return generalise_FP(y_true=y_true, y_pred=y_pred, step_function=self.squashed_sigmoid)
-
     def M(self, y_true, y_pred):
         epsilon = 0.0001
         numerator = tf.multiply(self.FN(y_true, y_pred), self.TN(y_true, y_pred) + self.FN(y_true, y_pred) + self.TP(y_true, y_pred) + self.FP(y_true, y_pred))
@@ -142,24 +155,28 @@ class InfiniteOutageCoefficientLoss(tf.keras.losses.Loss):
 
             tf.print("Updating history:", self.p_infty_avg, self.E_Q_less_qth_avg, global_qth)
         return P_infty_estimate
-
+    
 class FiniteOutageCoefficientLoss(InfiniteOutageCoefficientLoss):
-    def __init__(self, S: int, reduction=tf.keras.losses.Reduction.AUTO, name=None):
-        #self.qth = qth
+    def __init__(self, data_config, S: int, reduction=tf.keras.losses.Reduction.AUTO, name=None):
+        super(FiniteOutageCoefficientLoss, self).__init__(data_config=data_config, reduction=reduction, name=name)
         self.S = S
-        super().__init__(reduction=tf.keras.losses.Reduction.AUTO, name=None)
+        
+        # Ensure attributes are inherited correctly
+        self.p_infty_avg = self.p_infty_avg if hasattr(self, 'p_infty_avg') else tf.Variable(0.0, dtype=tf.float32, trainable=False)
+        self.E_Q_less_qth_avg = self.E_Q_less_qth_avg if hasattr(self, 'E_Q_less_qth_avg') else tf.Variable(0.0, dtype=tf.float32, trainable=False)
 
+        
     def q(self, y_true, y_pred):
-        epsilon = 0.0001
+        epsilon = 1e-4  # Avoid division by zero
         numerator = self.TP(y_true, y_pred) + self.FP(y_true, y_pred)
-        denominator =  epsilon + self.TP(y_true, y_pred) + self.FP(y_true, y_pred) + self.TN(y_true, y_pred) + self.FN(y_true, y_pred)
+        denominator = epsilon + self.TP(y_true, y_pred) + self.FP(y_true, y_pred) + self.TN(y_true, y_pred) + self.FN(y_true, y_pred)
         return tf.divide(numerator, denominator)
 
     def call(self, y_true, y_pred):
-        y_true_element = y_true
-        y_pred_element = y_pred
-        M = self.M(y_true_element, y_pred_element)
-        return M - tf.multiply(tf.pow(self.q(y_true_element, y_pred_element), self.S - 1), M - 1)+ tf.square(self.E_Q_less_qth_avg - P1_estimate)
+        P_infty_estimate = super().call(y_true, y_pred)
+        M = self.M(y_true, y_pred)
+        P1_estimate = calculate_P1(y_true, y_pred)
+        return M - tf.multiply(tf.pow(self.q(y_true, y_pred), self.S - 1), M - 1) + tf.square(self.E_Q_less_qth_avg - P1_estimate)
 
 if __name__ == "__main__":
     loss = InfiniteOutageCoefficientLoss()

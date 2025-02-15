@@ -15,6 +15,12 @@ from scipy.optimize import minimize
 from scipy.special import expit, logit
 import matplotlib.pyplot as plt
 
+
+global_qth = tf.Variable(0.5, trainable=False, dtype=tf.float32)  # Start at qth = 0.5
+p_infty_history = []
+E_Q_less_qth_history = []
+qth_history = []
+
 def bubble_sort_indices(arr):
     n = len(arr)
     indices = list(range(n))
@@ -71,26 +77,18 @@ temperature_value = 0 #used 10 before
 use_model = input("Press 1 to use LSTM, any other key for DQN-LSTM: ")
 
 def plot_p_infty_and_E_Q():
-    """Plots P_infty and E[Q | Q < qth] vs epochs."""
-    if not p_infty_per_epoch or not E_Q_less_qth_per_epoch:
-        print("Error: No data collected for plotting.")
-        return
-
-    epochs = list(range(1, len(p_infty_per_epoch) + 1))
-
+    epochs = list(range(1, len(p_infty_history) + 1))
     plt.figure(figsize=(8, 5), dpi=100)
-    plt.plot(epochs, p_infty_per_epoch, marker='o', linestyle='-', label="P_infty")
-    plt.plot(epochs, E_Q_less_qth_per_epoch, marker='s', linestyle='-', label="E[Q | Q < qth]")
-    plt.plot(epochs, qth_per_epoch, marker='x', linestyle='--', label="qth (Threshold)")
-
+    plt.plot(epochs, p_infty_history, marker='o', linestyle='-', label="P_infty", color="blue")
+    plt.plot(epochs, E_Q_less_qth_history, marker='s', linestyle='-', label="E[Q | Q < qth]", color="green")
+    plt.plot(epochs, qth_history, marker='x', linestyle='--', label="qth (Threshold)", color="red")
     plt.xlabel("Epochs")
     plt.ylabel("Values")
     plt.title("P_infty, E[Q | Q < qth], and qth over Epochs")
     plt.legend()
     plt.grid(True)
+    plt.xticks(epochs)
     plt.show()
-
-global_qth = tf.Variable(0.5, trainable=False, dtype=tf.float32)  # Start at qth = 0.5
 
 nll_function = DQNLSTM.calculate_binary_nll
 
@@ -106,6 +104,7 @@ if scaling_method == 'platt' and set_params:
 
 elif scaling_method == 'temp' and set_params:
     temp_T = float(input("Enter Temperature scaling parameter T: "))
+
 
 for snr in SNRs:
     #for qth in qth_range:
@@ -151,8 +150,8 @@ for snr in SNRs:
                                                                    )
                             else:
                                 model = DQNLSTM(epochs=epochs, data_config=data_config, model_name=model_name, lstm_units=lstm_size)
-
-                            plot_p_infty_and_E_Q()  
+                                
+                            plot_p_infty_and_E_Q()
                             training_generator = OutageData(**data_config,)
 
                             P_best_N[model_result] = 0.0
@@ -170,7 +169,7 @@ for snr in SNRs:
                             P_1_counter = 0
                             P_inf_counter = 0
                             cdf_counter = 0
-                            
+
                             if scaling_method != 'none':
                                 if scaling_method == 'platt':
                                     if set_params:
@@ -190,6 +189,7 @@ for snr in SNRs:
                                     model.calibrate(data_config, method='isotonic')
                                 else:
                                     model.calibrate(data_config, method=scaling_method)
+
 
                             for _ in range(number_of_tests):
                                 X, y_label = training_generator.__getitem__(0)

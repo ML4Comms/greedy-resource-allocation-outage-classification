@@ -92,7 +92,8 @@ class DQNLSTM:
         # Create the directory if it doesn't exist
         os.makedirs(directory, exist_ok=True)
         
-        # Define the loss function instance first
+        if self.force_retrain or not os.path.exists(filename):
+            # Define the loss function instance first
             if "fin_coef_loss" in self.model_name:
                 loss_fn = FiniteOutageCoefficientLoss(data_config=self.data_config, S=self.data_config["batch_size"])
             elif "mse" in self.model_name:
@@ -113,13 +114,14 @@ class DQNLSTM:
             print(f"Training model: {self.model_name}")
             self.model = model
             training_generator = OutageData(**self.data_config)
-            qth_callback = QthUpdateCallback(self,step_size=0.01, threshold=1e-3)
+            # Pass the loss function instance instead of `self`
+            qth_callback = QthUpdateCallback(loss_fn, step_size=0.01, threshold=1e-3)
             history = model.fit(training_generator, epochs=self.epochs, callbacks=[qth_callback])
             model.save(filename)
             return model
         else:
             print(f"Loading model: {self.model_name}")
-            model = tf.keras.models.load_model(filename, compile = False)
+            model = tf.keras.models.load_model(filename, compile=False)
             self.model = model
             return model
 

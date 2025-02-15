@@ -92,22 +92,24 @@ class DQNLSTM:
         # Create the directory if it doesn't exist
         os.makedirs(directory, exist_ok=True)
         
-        if self.force_retrain or not os.path.exists(filename):
-            if 'mse' in self.model_name:
-                model.compile(loss=MeanSquaredError(), optimizer='adam',metrics=[tf.keras.metrics.MeanSquaredError()])
-            elif 'binary_cross_entropy' in self.model_name:
-                model.compile(loss=BinaryCrossentropy(from_logits=False), optimizer='adam',metrics=[tf.keras.metrics.Recall(), 
-                                    tf.keras.metrics.Precision(),
-                                    tf.keras.metrics.BinaryAccuracy()])
-            elif 'mae' in self.model_name:
-                model.compile(loss=MeanAbsoluteError(), optimizer='adam', metrics=[tf.keras.metrics.MeanAbsoluteError()])
-            elif "fin_coef_loss" in self.model_name:
-                model.compile(loss=FiniteOutageCoefficientLoss(data_config=self.data_config, S=self.data_config["batch_size"]), optimizer='adam',metrics=[tf.keras.metrics.Recall(), 
-                                    tf.keras.metrics.Precision(),
-                                    tf.keras.metrics.BinaryAccuracy(),
-                                    tf.keras.metrics.Accuracy()])
+        # Define the loss function instance first
+            if "fin_coef_loss" in self.model_name:
+                loss_fn = FiniteOutageCoefficientLoss(data_config=self.data_config, S=self.data_config["batch_size"])
+            elif "mse" in self.model_name:
+                loss_fn = MeanSquaredError()
+            elif "binary_cross_entropy" in self.model_name:
+                loss_fn = BinaryCrossentropy(from_logits=False)
+            elif "mae" in self.model_name:
+                loss_fn = MeanAbsoluteError()
             else:
                 raise ValueError(f"Invalid loss name: {self.model_name}")
+
+            # Now compile the model with the loss function instance
+            model.compile(
+                loss=loss_fn, 
+                optimizer='adam',
+                metrics=[tf.keras.metrics.Recall(), tf.keras.metrics.Precision(), tf.keras.metrics.BinaryAccuracy()]
+            )
             print(f"Training model: {self.model_name}")
             self.model = model
             training_generator = OutageData(**self.data_config)

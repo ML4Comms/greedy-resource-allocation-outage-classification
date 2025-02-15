@@ -53,14 +53,6 @@ def calculate_P1(y_true, y_pred):
     denominator = TN + FN + TP + FP
     return tf.divide(TP + FN, denominator + 1e-4)  # Avoid division by zero
 
-def calculate_P1(y_true, y_pred):
-    TP = generalise_TP(y_true, y_pred)
-    FN = generalise_FN(y_true, y_pred)
-    TN = generalise_TN(y_true, y_pred)
-    FP = generalise_FP(y_true, y_pred)
-    denominator = TN + FN + TP + FP
-    return tf.divide(TP + FN, denominator + 1e-4)  # Avoid division by zero
-
 class MeanSquaredErrorTemperature(tf.keras.losses.Loss):
     def __init__(self, reduction=tf.keras.losses.Reduction.AUTO, name=None):
         super().__init__(reduction, name)

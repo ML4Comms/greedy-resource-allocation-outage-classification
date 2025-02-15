@@ -1,6 +1,8 @@
+from enum import Enum
 import tensorflow as tf
 import numpy as np
 from data_generator import OutageData
+from dqn_lstm import DQNLSTM
 from outage_loss import InfiniteOutageCoefficientLoss, FiniteOutageCoefficientLoss
 import os
 
@@ -55,13 +57,23 @@ def calibrate(data_input, model: TemperatureModel):
         opts = optimizer.minimize(compute_loss, var_list=[temp])
     return temp
 
+class ModelType(Enum):
+    TemperatureModel = 1
+    DQNLSTM = 2
+
 def get_model(data_input, 
                 model_name, 
                 qth: float,
-                lstm_units: int = 32):
+                lstm_units: int = 32,
+                model_type: ModelType = ModelType.TemperatureModel):
 
+    if model_type == ModelType.TemperatureModel:
+        model = TemperatureModel(output_size=data_input["output_size"], temp = 1, lstm_units=lstm_units)
+    elif model_type == ModelType.DQNLSTM:
+        model = DQNLSTM(qth, epochs=data_input["epoch_size"], data_config=data_input, model_name=model_name, lstm_units=lstm_units)
+    else:
+        raise Exception(f"Invalid model type: {model_type}")
 
-    model = TemperatureModel(output_size=data_input["output_size"], temp = 1, lstm_units=lstm_units)
     print(f"Training model: {model_name}")
     if "mse" in model_name:
         model.compile(loss=tf.keras.losses.MeanSquaredError(),
@@ -102,7 +114,8 @@ def get_fitted_model(data_input,
                     qth: float,
                     epochs: int = 2, 
                     force_retrain: bool = False,
-                    lstm_units: int = 32):
+                    lstm_units: int = 32,
+                    model_type: ModelType = ModelType.TemperatureModel):
     # TODO In relation to the above "weird" comment, this needs fixing here
     training_generator = OutageData(**data_input)
     path = f"models/{model_name}"
@@ -111,7 +124,8 @@ def get_fitted_model(data_input,
         model = get_model(data_input, 
                     model_name, 
                     qth,
-                    lstm_units)
+                    lstm_units,
+                    model_type=model_type)
 
         callback = tf.keras.callbacks.EarlyStopping(monitor='loss', patience=epochs, restore_best_weights=True)
         history = model.fit(training_generator, epochs=epochs,

@@ -67,6 +67,7 @@ force_retrain_models = True
 temperature_value = 0 #used 10 before
 # Prompt for model type once
 use_model = input("Press 1 to use LSTM, any other key for DQN-LSTM: ")
+# nll_function = DQNLSTM.calculate_binary_nll
 
 
 for snr in SNRs:
@@ -105,15 +106,17 @@ for snr in SNRs:
                                     }
                             
                             if use_model == '1':
-                                model = toy_models.get_fitted_model(data_input=data_config, 
-                                                                    model_name=model_name, 
-                                                                    epochs=epochs, 
-                                                                    force_retrain=force_retrain_models, 
-                                                                    lstm_units=lstm_size,
-                                                                    qth=qth_range)
+                                model_type = toy_models.ModelType.DQNLSTM
                             else:
-                                model = DQNLSTM(qth, epochs=epochs, data_config=data_config, model_name=model_name, lstm_units=lstm_size)
+                                model_type = toy_models.ModelType.TemperatureModel
 
+                            model = toy_models.get_fitted_model(data_input=data_config, 
+                                                                model_name=model_name, 
+                                                                epochs=epochs, 
+                                                                force_retrain=force_retrain_models, 
+                                                                lstm_units=lstm_size,
+                                                                qth=qth_range,
+                                                                model_type=model_type)
                                 
                             training_generator = OutageData(**data_config,)
 

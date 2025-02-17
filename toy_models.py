@@ -135,6 +135,10 @@ def get_fitted_model(data_input,
         class PrintQthCallback(tf.keras.callbacks.Callback):
             def __init__(self, loss):
                 super().__init__()
+                self.switched_direction_count = 0
+                self.max_switched_direction_count = 3
+                self.shift_size = 0.1
+                self.direction_up = False
                 self.loss = loss  # Store reference to the loss function
 
             def on_epoch_end(self, epoch, logs=None):
@@ -143,7 +147,25 @@ def get_fitted_model(data_input,
                     print(f"\n\nEqth = {self.loss.conditional_avg_y_pred.numpy()}\n\n")
                 if hasattr(self.loss, 'qth'):
                     print(f"\n\nPinf = {self.loss.conditional_avg_M.numpy()}\n\n")
-                self.loss.adjust_qth()
+                previous_qth = self.loss.qth.numpy()
+                self.loss.adjust_qth(shift=self.shift_size)
+                if self.loss.qth.numpy() > previous_qth:
+                    # Shifted upwards
+                    if self.direction_up:
+                        # Continuing in same direction
+                        # do nothing
+                        pass
+                    else:
+                        # Direction changed
+                        self.switched_direction_count += 1
+                    self.direction_up = True
+                else:
+                    self.direction_up = False
+
+                if self.switched_direction_count > self.max_switched_direction_count:
+                    self.shift_size /= 2
+                    self.switched_direction_count = 0
+                        
                 if hasattr(self.loss, 'qth'):
                     print(f"\n\nEpoch {epoch+1}: qth = {self.loss.qth.numpy()}\n\n")
                 else:

@@ -62,8 +62,8 @@ class InfiniteOutageCoefficientLoss(tf.keras.losses.Loss):
 
     def M(self, y_true, y_pred):
         epsilon = 0.0001
-        numerator = tf.multiply(self.FN(y_true, y_pred), self.TN(y_true, y_pred) + self.FN(y_true, y_pred) + self.TP(y_true, y_pred) + self.FP(y_true, y_pred))
-        denominator =  epsilon + tf.multiply(self.TN(y_true, y_pred) + self.FN(y_true, y_pred), self.FN(y_true, y_pred) + self.TP(y_true, y_pred))
+        numerator = self.FN(y_true, y_pred)
+        denominator =  epsilon + self.TN(y_true, y_pred) + self.FN(y_true, y_pred)
         return tf.divide(numerator, denominator)
 
     def call(self, y_true, y_pred):
@@ -79,6 +79,8 @@ class FiniteOutageCoefficientLoss(InfiniteOutageCoefficientLoss):
         self.conditional_avg_M = tf.Variable(0.0, trainable=False, dtype=tf.float32)  
         self.count_y_pred = tf.Variable(0, trainable=False, dtype=tf.float32)  
         self.count_M = tf.Variable(0, trainable=False, dtype=tf.float32)
+
+        self.bce = tf.keras.losses.BinaryCrossentropy()
 
         super().__init__(reduction=reduction, name=name, qth=qth)
 
@@ -102,6 +104,12 @@ class FiniteOutageCoefficientLoss(InfiniteOutageCoefficientLoss):
     def P1(self, y_true, y_pred):
         epsilon = 0.0000001
         numerator = self.TP(y_true, y_pred) + self.FN(y_true, y_pred)
+        denominator =  epsilon + self.TN(y_true, y_pred) + self.FN(y_true, y_pred) + self.TP(y_true, y_pred) + self.FP(y_true, y_pred)
+        return tf.divide(numerator, denominator)
+
+    def FQ(self, y_true, y_pred):
+        epsilon = 0.0000001
+        numerator = self.TN(y_true, y_pred) + self.FN(y_true, y_pred)
         denominator =  epsilon + self.TN(y_true, y_pred) + self.FN(y_true, y_pred) + self.TP(y_true, y_pred) + self.FP(y_true, y_pred)
         return tf.divide(numerator, denominator)
 
@@ -138,16 +146,18 @@ class FiniteOutageCoefficientLoss(InfiniteOutageCoefficientLoss):
         self.conditional_avg_M.assign(new_avg_M)
         self.count_M.assign(new_count_M)
 
-    def adjust_qth(self):
+    def adjust_qth(self, shift):
         """ Dynamically updates qth based on the relationship between conditional_avg_y_pred and conditional_avg_M """
 
         # Shift qth down if conditional_avg_y_pred > conditional_avg_M, otherwise shift up
         shift = tf.cond(
             self.conditional_avg_y_pred > self.conditional_avg_M,
-            lambda: -0.03,  # Decrease qth
-            lambda: 0.03    # Increase qth
+            lambda: -shift,  # Decrease qth
+            lambda: shift    # Increase qth
         )
         self.qth.assign_add(shift)
+        if self.qth >= 0.999:
+            self.qth.assign(0.999)
         self.conditional_avg_y_pred.assign(0)
         self.conditional_avg_M.assign(0)
         self.count_M.assign(0)
@@ -162,7 +172,8 @@ class FiniteOutageCoefficientLoss(InfiniteOutageCoefficientLoss):
 
         # Update running averages
         self.update_conditional_avg(y_pred_element, M)
-        return M - tf.multiply(tf.pow(self.q(y_true_element, y_pred_element), self.S - 1), M - 1) + tf.square(self.conditional_average(y_pred, self.qth) - self.M(y_true, y_pred))
+        return M - tf.multiply(tf.pow(self.q(y_true_element, y_pred_element), self.S - 1), M - 1) + tf.square(tf.reduce_mean(y_pred - self.qth))
+        # return self.P1(y_true,y_pred) * (tf.pow(1-self.FQ(y_true_element, y_pred_element), self.S - 1)) + self.M(y_true,y_pred) * (1-(tf.pow(1-self.FQ(y_true_element, y_pred_element), self.S - 1))) + self.bce(y_true, y_pred)#+ tf.square(self.conditional_average(y_pred, self.qth) - self.M(y_true, y_pred)) + tf.square(self.conditional_average(y_pred, 1) - self.P1(y_true, y_pred))
 
 if __name__ == "__main__":
     loss = InfiniteOutageCoefficientLoss()

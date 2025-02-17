@@ -55,8 +55,8 @@ number_of_training_routines_per_model = 1
 number_to_discard = 0
 out = 10
 number_of_tests = 6
-SNRs = [10.0]#FOR SNR =1 its 2000; for 8 its 6000
-qth_range = [0.05]
+SNRs = [35.0]#FOR SNR =1 its 2000; for 8 its 6000
+qth_range = [0.5]
 phase_shift = 0.1
 epochs = 100
 epoch_size = 100

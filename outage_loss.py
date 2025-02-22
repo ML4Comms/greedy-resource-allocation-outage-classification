@@ -172,7 +172,7 @@ class FiniteOutageCoefficientLoss(InfiniteOutageCoefficientLoss):
 
         # Update running averages
         self.update_conditional_avg(y_pred_element, M)
-        return M - tf.multiply(tf.pow(self.q(y_true_element, y_pred_element), self.S - 1), M - 1) + tf.square(tf.reduce_mean(y_pred - self.qth))
+        return M - tf.multiply(tf.pow(self.q(y_true, y_pred), self.S - 1), M - 1) + tf.square((tf.maximum(self.qth - y_pred, 0)))
         # return self.P1(y_true,y_pred) * (tf.pow(1-self.FQ(y_true_element, y_pred_element), self.S - 1)) + self.M(y_true,y_pred) * (1-(tf.pow(1-self.FQ(y_true_element, y_pred_element), self.S - 1))) + self.bce(y_true, y_pred)#+ tf.square(self.conditional_average(y_pred, self.qth) - self.M(y_true, y_pred)) + tf.square(self.conditional_average(y_pred, 1) - self.P1(y_true, y_pred))
 
 if __name__ == "__main__":

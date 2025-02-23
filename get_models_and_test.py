@@ -55,18 +55,18 @@ number_of_training_routines_per_model = 1
 number_to_discard = 0
 out = 10
 number_of_tests = 6
-SNRs = [35.0]#FOR SNR =1 its 2000; for 8 its 6000
+SNRs = [2.0]#FOR SNR =1 its 2000; for 8 its 6000
 qth_range = [0.5]
 phase_shift = 0.1
-epochs = 100
-epoch_size = 100
+epochs = 30
+epoch_size = 150
 resources = [4]
 rates = [0.5]
 model_prefix_names = ["fin_coef_loss"]
 force_retrain_models = True
 temperature_value = 0 #used 10 before
 # Prompt for model type once
-use_model = input("Press 1 to use LSTM, any other key for DQN-LSTM: ")
+use_model = input("Press 1 to use DQN-LSTM, any other key for LSTM: ")
 # nll_function = DQNLSTM.calculate_binary_nll
 
 
@@ -137,7 +137,7 @@ for snr in SNRs:
                             cdf_counter = 0
                             
                             
-                            dqn_lstm = DQNLSTM(qth,epochs=epochs,data_config=data_config,model_name=model_name,lstm_units=lstm_size)
+                            #dqn_lstm = DQNLSTM(qth,epochs=epochs,data_config=data_config,model_name=model_name,lstm_units=lstm_size)
 
 
                             for _ in range(number_of_tests):

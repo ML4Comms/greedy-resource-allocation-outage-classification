@@ -132,50 +132,46 @@ def get_fitted_model(data_input,
                                          lstm_units,
                                          model_type=model_type)
 
-        class PrintQthCallback(tf.keras.callbacks.Callback):
-            def __init__(self, loss):
-                super().__init__()
-                self.switched_direction_count = 0
-                self.max_switched_direction_count = 3
-                self.shift_size = 0.1
-                self.direction_up = False
-                self.loss = loss  # Store reference to the loss function
+        #class PrintQthCallback(tf.keras.callbacks.Callback):
+        #    def __init__(self, loss):
+        #        super().__init__()
+        #        self.switched_direction_count = 0
+        #        self.max_switched_direction_count = 3
+        #        self.shift_size = 0.1
+        #        self.direction_up = False
+        #       self.loss = loss  # Store reference to the loss function
 
-            def on_epoch_end(self, epoch, logs=None):
-                print("\n\non_epoch_end\n\n")
-                if hasattr(self.loss, 'conditional_avg_y_pred'):
-                    print(f"\n\nEqth = {self.loss.conditional_avg_y_pred.numpy()}\n\n")
-                if hasattr(self.loss, 'qth'):
-                    print(f"\n\nPinf = {self.loss.conditional_avg_M.numpy()}\n\n")
-                previous_qth = self.loss.qth.numpy()
-                self.loss.adjust_qth(shift=self.shift_size)
-                if self.loss.qth.numpy() > previous_qth:
-                    # Shifted upwards
-                    if self.direction_up:
+        #    def on_epoch_end(self, epoch, logs=None):
+        #        print("\n\non_epoch_end\n\n")
+        #        if hasattr(self.loss, 'conditional_avg_y_pred'):
+        #            print(f"\n\nEqth = {self.loss.conditional_avg_y_pred.numpy()}\n\n")
+        #        if hasattr(self.loss, 'qth'):
+        #            print(f"\n\nPinf = {self.loss.conditional_avg_M.numpy()}\n\n")
+        #        previous_qth = self.loss.qth.numpy()
+        #        self.loss.adjust_qth(shift=self.shift_size)
+        #        if self.loss.qth.numpy() > previous_qth:
+        #            # Shifted upwards
+        #            if self.direction_up:
                         # Continuing in same direction
                         # do nothing
-                        pass
-                    else:
-                        # Direction changed
-                        self.switched_direction_count += 1
-                    self.direction_up = True
-                else:
-                    self.direction_up = False
-
-                if self.switched_direction_count > self.max_switched_direction_count:
-                    self.shift_size /= 2
-                    self.switched_direction_count = 0
+        #                pass
+        #            else:
+        #                # Direction changed
+        #                self.switched_direction_count += 1
+        #            self.direction_up = True
+        #       else:
+        #            self.direction_up = False
+#
+ #               if self.switched_direction_count > self.max_switched_direction_count:
+  #                  self.shift_size /= 2
+   #                 self.switched_direction_count = 0
                         
-                if hasattr(self.loss, 'qth'):
-                    print(f"\n\nEpoch {epoch+1}: qth = {self.loss.qth.numpy()}\n\n")
-                else:
-                    print("\n\nno qth\n\n")
+    #            if hasattr(self.loss, 'qth'):
+     #               print(f"\n\nEpoch {epoch+1}: qth = {self.loss.qth.numpy()}\n\n")
+      #          else:
+       #             print("\n\nno qth\n\n")
 
-        callbacks = [
-            tf.keras.callbacks.EarlyStopping(monitor='loss', patience=epochs, restore_best_weights=True),
-            PrintQthCallback(loss)
-        ]
-
+        callbacks = [tf.keras.callbacks.EarlyStopping(monitor='loss', patience=epochs, restore_best_weights=True)]
         history = model.fit(training_generator, epochs=epochs, callbacks=callbacks)
         
         model.save(path)

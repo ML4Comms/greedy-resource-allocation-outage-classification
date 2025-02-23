@@ -71,7 +71,7 @@ if __name__ == "__main__":
 
                                 # Compute regular Pinf (M) and Eqth
                                 Pinf = loss_function.M(y_true, y_pred).numpy()  
-                                Eqth = np.mean(y_pred_np[y_pred_np <= qth_test]) if np.sum(y_pred_np <= qth_test) > 0 else 0.0  # ✅ Eqth calculation
+                                Eqth = np.mean(y_pred_np[y_pred_np <= qth_test]) if np.sum(y_pred_np <= qth_test) > 0 else 0.0  
 
                                 Pinf_values.append(Pinf)
                                 Eqth_values.append(Eqth)
@@ -93,7 +93,7 @@ if __name__ == "__main__":
 
                                 # Compute isotonic Pinf & Eqth
                                 Pinf_iso = loss_function.M(y_true_tensor, y_pred_iso_tensor).numpy()  
-                                Eqth_iso = np.mean(y_pred_iso_all[y_pred_iso_all <= qth_test]) if np.sum(y_pred_iso_all <= qth_test) > 0 else 0.0  # ✅ Eqth for isotonic
+                                Eqth_iso = np.mean(y_pred_iso_all[y_pred_iso_all <= qth_test]) if np.sum(y_pred_iso_all <= qth_test) > 0 else 0.0  
 
                                 Pinf_iso_values.append(Pinf_iso)
                                 Eqth_iso_values.append(Eqth_iso)

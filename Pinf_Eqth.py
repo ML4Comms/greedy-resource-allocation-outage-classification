@@ -5,32 +5,42 @@ from data_generator import OutageData
 from outage_loss import InfiniteOutageCoefficientLoss
 import json
 
-# Define parameters
-SNRs = [2.0]
-resources = [4]
-lstm_size = 32
-models = ["fin_coef_loss"]
-rate_thresholds = [0.5]
+# Define test parameters
+SNRs = [2.0]  
+resources = [4]  
+lstm_size = 32  
+models = ["fin_coef_loss"]  
+rate_thresholds = [0.5]  
 
 qth_train_values = [0.5]  
-qth_test_values = [0.00001, 0.0001, 0.001, 0.01, 0.1, 0.5]
+qth_test_values = [0.001]  
 
-num_tests = 10000  # Number of test runs
-
+num_tests = 10000  
 
 results = {}
 
+# Define `conditional_average()` in the main script
+def conditional_average(y_pred, qth):
+    y_pred_tensor = tf.convert_to_tensor(y_pred, dtype=tf.float32)
+
+    # Masking values where y_pred <= qth
+    mask_y_pred = tf.cast(y_pred_tensor <= qth, tf.float32)
+    valid_y_pred = y_pred_tensor * mask_y_pred  
+    count_valid_y_pred = tf.reduce_sum(mask_y_pred)  
+    sum_valid_y_pred = tf.reduce_sum(valid_y_pred)
+
+    return tf.math.divide_no_nan(sum_valid_y_pred, tf.cast(count_valid_y_pred, tf.float32))
+
 if __name__ == "__main__":
     for snr in SNRs:
-        for rt in rate_thresholds:
-            for model in models:
+        for rate_threshold in rate_thresholds:
+            for model_name in models:
                 for resource in resources:
                     for qth_train in qth_train_values:  
-                        path_name = f"models/{model}_snr-{snr}_rt-{rt}_r-{resource}_qth--{qth_train}_lstm-{lstm_size}_out-{10}_phase-{0.1}"
-                        dqn_lstm_model = tf.keras.models.load_model(path_name, compile=False)
+                        model_path = f"models/{model_name}_snr-{snr}_rt-{rate_threshold}_r-{resource}_qth--{qth_train}_lstm-{lstm_size}_out-{10}_phase-{0.1}"
+                        lstm_model = tf.keras.models.load_model(model_path, compile=False)
 
-                        # Create data generator
-                        inputs = {
+                        data_config = {
                             "taps": 1024,
                             "padding": 0,
                             "input_size": 100,
@@ -38,84 +48,79 @@ if __name__ == "__main__":
                             "batch_size": resource,
                             "epoch_size": 150,
                             "phase_shift": 0.1,
-                            "rate_threshold": rt,
+                            "rate_threshold": rate_threshold,
                             "snr": snr
                         }
-                        training_generator = OutageData(**inputs)
+                        test_generator = OutageData(**data_config)
 
                         model_results = {}
 
                         for qth_test in qth_test_values:
-                            # Initialize loss function with qth_test
-                            loss_function = InfiniteOutageCoefficientLoss(qth=qth_test)
+                            loss_function = InfiniteOutageCoefficientLoss(qth=qth_train)
 
                             Pinf_values = []
                             Eqth_values = []
 
-                            # Variables for isotonic scaling
                             y_pred_all = []
                             y_true_all = []
 
-                        
                             for _ in range(num_tests):
-                                X, y_true = training_generator.__getitem__(0)
-                                y_pred = dqn_lstm_model.predict(X)
+                                X, y_true = test_generator.__getitem__(0)
+                                y_pred = lstm_model.predict(X)
 
-                                # Convert to NumPy (only if it's a tensor)
                                 y_true_np = y_true.numpy() if isinstance(y_true, tf.Tensor) else y_true
                                 y_pred_np = y_pred.numpy() if isinstance(y_pred, tf.Tensor) else y_pred
 
-                                # Store predictions for isotonic regression
                                 y_true_all.extend(y_true_np.flatten())
                                 y_pred_all.extend(y_pred_np.flatten())
 
-                                # Compute regular Pinf (M) and Eqth
-                                Pinf = loss_function.M(y_true, y_pred).numpy()  
-                                Eqth = np.mean(y_pred_np[y_pred_np <= qth_test]) if np.sum(y_pred_np <= qth_test) > 0 else 0.0  
+                                # Compute Pinf using M()
+                                Pinf_values.append(float(loss_function.M(y_true, y_pred).numpy()))
 
-                                Pinf_values.append(Pinf)
-                                Eqth_values.append(Eqth)
+                                # Compute Eqth using `conditional_average()` (NOT from `loss_function`)
+                                Eqth_val = float(conditional_average(y_pred_np, qth_train).numpy())
+                                Eqth_values.append(Eqth_val if not np.isnan(Eqth_val) else 0)
 
-                            # Train isotonic regression once after collecting all predictions
+                            # Apply Isotonic Regression
                             isotonic_regressor = IsotonicRegression(out_of_bounds="clip")
-                            isotonic_regressor.fit(y_pred_all, y_true_all) 
-                            
-                            #  Single pass for isotonic-scaled Pinf & Eqth
+                            isotonic_regressor.fit(y_pred_all, y_true_all)
+                            y_pred_iso_all = isotonic_regressor.transform(y_pred_all)
+
                             Pinf_iso_values = []
                             Eqth_iso_values = []
 
-                            # Apply isotonic regression to all stored predictions
-                            y_pred_iso_all = isotonic_regressor.transform(y_pred_all)
+                            for idx in range(len(y_true_all)):
+                                y_pred_iso = y_pred_iso_all[idx]  # Get isotonic-calibrated prediction
 
-                            for i in range(len(y_pred_all)):
-                                y_pred_iso_tensor = tf.convert_to_tensor([[y_pred_iso_all[i]]], dtype=tf.float32)
-                                y_true_tensor = tf.convert_to_tensor([[y_true_all[i]]], dtype=tf.float32)
+                                #  Compute Isotonic Pinf using M() with isotonic-scaled predictions
+                                y_pred_iso_tensor = tf.convert_to_tensor([[y_pred_iso]], dtype=tf.float32)
+                                y_true_tensor = tf.convert_to_tensor([[y_true_all[idx]]], dtype=tf.float32)
 
-                                # Compute isotonic Pinf & Eqth
-                                Pinf_iso = loss_function.M(y_true_tensor, y_pred_iso_tensor).numpy()  
-                                Eqth_iso = np.mean(y_pred_iso_all[y_pred_iso_all <= qth_test]) if np.sum(y_pred_iso_all <= qth_test) > 0 else 0.0  
+                                Pinf_iso_values.append(float(loss_function.M(y_true_tensor, y_pred_iso_tensor).numpy()))
 
-                                Pinf_iso_values.append(Pinf_iso)
-                                Eqth_iso_values.append(Eqth_iso)
+                            # Compute Isotonic Eqth using `conditional_average()`
+                            Eqth_iso_mean = float(conditional_average(y_pred_iso_all, qth_train).numpy())
+                            Eqth_iso_mean = Eqth_iso_mean if not np.isnan(Eqth_iso_mean) else 0
 
+                            #  Store Final Results
                             model_results[qth_test] = {
                                 "Regular": {
-                                    "Pinf": float(np.mean(Pinf_values)),
-                                    "Eqth": float(np.mean(Eqth_values))
+                                    "Pinf": np.mean(Pinf_values),
+                                    "Eqth": np.mean(Eqth_values)
                                 },
                                 "Isotonic": {
-                                    "Pinf": float(np.mean(Pinf_iso_values)),
-                                    "Eqth": float(np.mean(Eqth_iso_values))
+                                    "Pinf": np.mean(Pinf_iso_values),
+                                    "Eqth": Eqth_iso_mean
                                 }
                             }
 
-                            print(f"Test qth={qth_test:.5f} -> Pinf={np.mean(Pinf_values):.4f}, Eqth={np.mean(Eqth_values):.4f}")
-                            print(f"Isotonic qth={qth_test:.5f} -> Pinf={np.mean(Pinf_iso_values):.4f}, Eqth={np.mean(Eqth_iso_values):.4f}")
+                            #  Print the Results
+                            print(f"Test qth_test={qth_test:.5f} -> Pinf={np.mean(Pinf_values):.4f}, Eqth (qth_train)={np.mean(Eqth_values):.4f}")
+                            print(f"Isotonic qth_test={qth_test:.5f} -> Pinf={np.mean(Pinf_iso_values):.4f}, Eqth (qth_train)={Eqth_iso_mean:.4f}")
 
-                        # Save model results (include qth_train in key)
-                        results[f"{model}_snr-{snr}_rt-{rt}_r-{resource}_qth-{qth_train}"] = model_results
+                        results[f"{model_name}_snr-{snr}_rt-{rate_threshold}_r-{resource}_qth-{qth_train}"] = model_results
 
-    # Save results to a file (now JSON serializable)
+    # Save results to JSON file
     with open("pinf_eqth_results.json", "w") as file:
         json.dump(results, file, indent=4)
 

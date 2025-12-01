@@ -1,1 +1,27 @@
-*results*.txt
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# TensorFlow, Keras model files and checkpoints
+*.keras
+*.h5
+*.pb
+saved_model.pb
+checkpoint
+variables/
+assets/
+
+# Model directories inside 'models'
+models/*
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# Temporary files
+*.tmp
+*.log
+
+# VSCode settings folders
+.vscode/

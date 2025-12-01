@@ -1,23 +1,22 @@
 import numpy as np
 import tensorflow as tf
-import matplotlib.pyplot as plt
 import os
-import json
 from data_generator import OutageData
 from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import LSTM, Dense
-from tensorflow.keras.losses import MeanSquaredError
-from tensorflow.keras.losses import BinaryCrossentropy
-from tensorflow.keras.losses import MeanAbsoluteError
-from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint
-from outage_loss import InfiniteOutageCoefficientLoss
-from outage_loss import FiniteOutageCoefficientLoss
+from tensorflow.keras.layers import LSTM, Dense,PReLU
+from tensorflow.keras.losses import MeanSquaredError, BinaryCrossentropy, MeanAbsoluteError
+from tensorflow.keras.callbacks import EarlyStopping
+from outage_loss import InfiniteOutageCoefficientLoss, FiniteOutageCoefficientLoss
+from sklearn.linear_model import LogisticRegression
+from sklearn.isotonic import IsotonicRegression
+from scipy.optimize import minimize
+from scipy.special import logit
+from betacal import BetaCalibration
 
-# TODO Make setting this less weird!
+
 data_config = {}
-
 class DQNLSTM:
-    def __init__(self, qth:float,model_name=None, epochs=100,data_config= None,learning_rate=0.001,force_retrain: bool= True,lstm_units: int = 32):
+    def __init__(self, qth: float, model_name=None, epochs=100, data_config=None, learning_rate=0.001, force_retrain=True, lstm_units=32):
         self.input_shape = (data_config["batch_size"], data_config["input_size"], 1)
         self.output_shape = (data_config["output_size"], 1)
         self.memory = []
@@ -29,18 +28,21 @@ class DQNLSTM:
         self.epochs = epochs
         self.data_config = data_config
         self.qth = qth
-        #self.batch_size = batch_size
         self.learning_rate = learning_rate
         self.force_retrain = force_retrain
         self.lstm_units = lstm_units
+        self.temp = None
+        self.A, self.B = None, None
+        self.a, self.b, self.c = None, None, None
+        self.isotonic_regressor = None
         self.model = self.build_model()
-        
 
     def build_model(self):
         model = Sequential()
-        model.add(LSTM(self.lstm_units, input_shape=(self.input_shape[1], self.input_shape[2]),return_sequences= False))
+        model.add(LSTM(self.lstm_units, input_shape=(self.input_shape[1], self.input_shape[2]), return_sequences=False))
         model.add(Dense(10, activation='PReLU'))
-        model.add(Dense(1,activation='sigmoid'))  # Use the first element of output_shape as the number of units
+        model.add(Dense(1, activation='sigmoid'))
+        
         directory = f"models/{self.model_name}"
         filename = f"{directory}/model.keras"
 
@@ -49,15 +51,15 @@ class DQNLSTM:
         
         if self.force_retrain or not os.path.exists(filename):
             if 'mse' in self.model_name:
-                model.compile(loss=MeanSquaredError(), optimizer='adam',metrics=[tf.keras.metrics.MeanSquaredError()])
-            elif 'binary_cross_entropy' in self.model_name:
-                model.compile(loss=BinaryCrossentropy(from_logits=False), optimizer='adam',metrics=[tf.keras.metrics.Recall(), 
+                model.compile(loss=MeanSquaredError(), optimizer='adam', metrics=[tf.keras.metrics.MeanSquaredError()])
+            elif 'bce' in self.model_name:
+                model.compile(loss=BinaryCrossentropy(from_logits=False), optimizer='adam', metrics=[tf.keras.metrics.Recall(), 
                                     tf.keras.metrics.Precision(),
                                     tf.keras.metrics.BinaryAccuracy()])
             elif 'mae' in self.model_name:
                 model.compile(loss=MeanAbsoluteError(), optimizer='adam', metrics=[tf.keras.metrics.MeanAbsoluteError()])
-            elif "fin_coef_loss" in self.model_name:
-                model.compile(loss=FiniteOutageCoefficientLoss(S=self.data_config["batch_size"], qth=self.qth), optimizer='adam',metrics=[tf.keras.metrics.Recall(), 
+            elif "olf" in self.model_name:
+                model.compile(loss=FiniteOutageCoefficientLoss(S=self.data_config["batch_size"], qth=self.qth), optimizer='adam', metrics=[tf.keras.metrics.Recall(), 
                                     tf.keras.metrics.Precision(),
                                     tf.keras.metrics.BinaryAccuracy(),
                                     tf.keras.metrics.Accuracy()])
@@ -67,13 +69,19 @@ class DQNLSTM:
             training_generator = OutageData(**self.data_config)
             callback = tf.keras.callbacks.EarlyStopping(monitor='loss', patience=self.epochs, restore_best_weights=True)
             history = model.fit(training_generator, epochs=self.epochs, callbacks=[callback])
+            try:
+                model.save(filename)
+            except Exception as e:
+                print(f"Error saving model: {e}")
             return model
         else:
             print(f"Loading model: {self.model_name}")
-            model = tf.keras.models.load_model(filename, compile = False)
-            model.save(filename)
+            try:
+                model = tf.keras.models.load_model(filename, compile=False)
+            except Exception as e:
+                print(f"Error loading model: {e}")
+                raise
             return model
-        
     
     def remember(self, state, action, reward, next_state, done):
         self.memory.append((state, action, reward, next_state, done))
@@ -83,7 +91,6 @@ class DQNLSTM:
             return np.random.uniform()  # Choose a random action
         next_state_pred = self.model.predict(state)  # Predict the value of the next state
         return next_state_pred
-
 
     def replay(self, batch_size):
         batch = np.random.choice(len(self.memory), batch_size, replace=False)
@@ -97,7 +104,6 @@ class DQNLSTM:
             self.epsilon *= self.epsilon_decay
 
     def predict(self, *args, **kwargs):
-        # Directly call the predict method of the encapsulated Keras model
         return self.model.predict(*args, **kwargs)
 
     def train(self, X, y_label, num_episodes=1000, batch_size=32):
@@ -122,31 +128,34 @@ class DQNLSTM:
                     if len(self.memory) > batch_size:
                         self.replay(batch_size)
 
-
                 rewards.append(total_reward)
                 print(f"Episode: {episode + 1}, Total Reward: {total_reward}")
 
         return rewards
+
     @staticmethod
     def calculate_binary_nll(y_true, y_pred_probs, epsilon=1e-5):
         """Calculate Binary Negative Log-Likelihood (NLL)."""
         y_pred_probs = tf.clip_by_value(y_pred_probs, epsilon, 1 - epsilon)
         return -tf.reduce_mean(y_true * tf.math.log(y_pred_probs) + (1 - y_true) * tf.math.log(1 - y_pred_probs))
-
-    def calibrate(self, data_input, method='platt', nll_function=calculate_binary_nll):
+    
+    def calibrate(self, data_input, method='platt'):
         temp = tf.Variable(initial_value=1.0, trainable=True, dtype=tf.float32)
         training_generator = OutageData(**data_input)
         optimizer = tf.optimizers.Adam(learning_rate=0.0005)
         
         if method == 'temp':
-            def compute_temp_loss(y_pred, y):
-                y_pred_model_w_temp = y_pred / temp
-                loss = nll_function(tf.convert_to_tensor(y, dtype=tf.float32), tf.convert_to_tensor(y_pred_model_w_temp, dtype=tf.float32))
+            def compute_temp_loss(y_pred, y_true):
+                y_pred_logits = logit(y_pred)
+                scaled_logits = y_pred_logits / temp
+                # Compute cross-entropy loss
+                loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(labels=y_true, logits=scaled_logits))
                 return loss
 
             for i in range(10000):
                 X, y = training_generator.__getitem__(0)
                 y_pred = self.model.predict(X)
+                
 
                 with tf.GradientTape() as tape:
                     loss = compute_temp_loss(y_pred, y)
@@ -162,40 +171,46 @@ class DQNLSTM:
         elif method == 'platt':
             all_y_true = []
             all_y_pred = []
-            for _ in range(10000):
+            for _ in range(6000):
                 X, y = training_generator.__getitem__(0)
                 y_pred = self.model.predict(X)
                 all_y_true.extend(y)
                 all_y_pred.extend(y_pred)
-
+                
+            all_y_true = np.array(all_y_true).flatten()  # Flattening to ensure correct shape
+            all_y_pred = np.array(all_y_pred).flatten()  # Flattening to ensure correct shape
+            
+            epsilon = 1e-7  # Safe threshold for float64
+            all_y_pred = np.clip(all_y_pred, epsilon, 1 - epsilon)  # Clip probabilities
+            
+            # Logistic regression for Platt scaling is applied on logits, not probabilities
+            logits = np.log(all_y_pred / (1 - all_y_pred))  # Convert probabilities to logits
             lr = LogisticRegression()
-            lr.fit(np.array(all_y_pred).reshape(-1, 1), np.array(all_y_true).reshape(-1))
-            self.A = lr.coef_[0][0]
-            self.B = lr.intercept_[0]
+            lr.fit(logits.reshape(-1, 1), all_y_true)  # Fit on logits, not probabilities
+            # Assign coefficients
+            self.A = lr.coef_[0][0]  # Slope
+            self.B = lr.intercept_[0]  # Intercept
+            print(f"Fitted Platt scaling coefficients: A = {self.A}, B = {self.B}")
             return self.A, self.B
 
         elif method == 'beta':
-            def nll_loss(params):
-                a, b, c = params
-                scaled_preds = 1 / (1 + np.exp(-a * np.log(np.array(all_y_pred)) - b * np.log(1 - np.array(all_y_pred)) - c))
-                return nll_function(tf.convert_to_tensor(np.array(all_y_true), dtype=tf.float32), tf.convert_to_tensor(scaled_preds, dtype=tf.float32))
-
             all_y_true = []
             all_y_pred = []
-            for _ in range(10000):
+            for _ in range(11000):
                 X, y = training_generator.__getitem__(0)
                 y_pred = self.model.predict(X)
                 all_y_true.extend(y)
                 all_y_pred.extend(y_pred)
 
-            result = minimize(nll_loss, x0=[1.0, 1.0, 0.0], bounds=[(0.01, 10), (0.01, 10), (-10, 10)])
-            self.a, self.b, self.c = result.x
-            return self.a, self.b, self.c
+            beta_calibrator = BetaCalibration(parameters="abm")
+            beta_calibrator.fit(all_y_pred, all_y_true)
+            self.beta_calibrator = beta_calibrator
+            return self.beta_calibrator
         
         elif method == 'isotonic':
             all_y_true = []
             all_y_pred = []
-            for _ in range(10000):
+            for _ in range(11000):
                 X, y = training_generator.__getitem__(0)
                 y_pred = self.model.predict(X)
                 all_y_true.extend(y)
@@ -217,12 +232,22 @@ class DQNLSTM:
             all_y_pred = all_y_pred[valid_mask]
             
             ir = IsotonicRegression(out_of_bounds='clip')
+            #ir = IsotonicRegression()
             self.isotonic_regressor = ir.fit(all_y_pred, all_y_true)
             return self.isotonic_regressor
 
         else:
             raise ValueError(f"Invalid calibration method: {method}")
+        
     def isotonic_predict(self, y_pred):
         if self.isotonic_regressor is None:
             raise ValueError("Isotonic regressor is not trained. Please run calibrate method with 'isotonic' option first.")
-        return self.isotonic_regressor.transform(y_pred)
+        return self.isotonic_regressor.transform(y_pred)  
+            
+    # def isotonic_predict(self, y_pred):
+    #     if self.isotonic_regressor is None:
+    #         raise ValueError("Isotonic regressor is not trained. Please run calibrate method with 'isotonic' option first.")
+    #     # Convert to NumPy array and ensure it's 1D
+    #     y_pred = np.array(y_pred).flatten()
+    #     y_pred_calibrated = self.isotonic_regressor.transform(y_pred)
+    #     return y_pred_calibrated.reshape(-1, 1)  # Convert back to 2D

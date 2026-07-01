@@ -1,0 +1,26 @@
+HOW TO RUN
+==========
+
+1. INSTALL DEPENDENCIES
+    pip install opencv-python numpy tensorflow scipy scikit-learn betacal
+
+2. GENERATE MODELS
+    run get_models_and_test.py
+    This will save the trained models to the models/ folder.
+
+3. RUN DEMO
+    run demo_calibration.py
+
+    The following files must be in the same folder:
+        demo_calibration.py
+        data_generator_.py
+        input_video.mp4
+        models/  (generated in step 2)
+
+    You will be prompted to choose a calibration method:
+        1 - Platt scaling
+        2 - Beta scaling
+        3 - Isotonic regression
+
+4. OUTPUT
+    - output_demo.mp4 saved to the same folder.
